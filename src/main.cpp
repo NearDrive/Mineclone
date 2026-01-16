@@ -10,11 +10,14 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "Camera.h"
 #include "Shader.h"
 #include "voxel/Chunk.h"
 #include "voxel/ChunkManager.h"
+#include "voxel/ChunkMesh.h"
+#include "voxel/ChunkMesher.h"
 #include "voxel/VoxelCoords.h"
 
 namespace {
@@ -22,7 +25,7 @@ constexpr int kWindowWidth = 1280;
 constexpr int kWindowHeight = 720;
 constexpr float kFov = 60.0f;
 
-Camera gCamera(glm::vec3(0.0f, 0.0f, 3.0f), -90.0f, 0.0f);
+Camera gCamera(glm::vec3(0.0f, 20.0f, 40.0f), -90.0f, -15.0f);
 bool gFirstMouse = true;
 bool gMouseCaptured = true;
 float gLastX = static_cast<float>(kWindowWidth) / 2.0f;
@@ -65,6 +68,11 @@ void setMouseCapture(GLFWwindow* window, bool capture) {
         glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     }
 }
+
+struct ChunkRenderItem {
+    voxel::ChunkCoord coord;
+    voxel::ChunkMesh mesh;
+};
 
 #ifndef NDEBUG
 void runVoxelSanityChecks() {
@@ -197,75 +205,56 @@ int main() {
 
     Shader shader;
     std::string shaderError;
-    if (!shader.loadFromFiles("shaders/basic.vert", "shaders/basic.frag", shaderError)) {
+    if (!shader.loadFromFiles("shaders/voxel.vert", "shaders/voxel.frag", shaderError)) {
         std::cerr << "[Shader] " << shaderError << '\n';
         glfwDestroyWindow(window);
         glfwTerminate();
         return EXIT_FAILURE;
     }
 
-    float cubeVertices[] = {
-        // positions          // colors
-        -0.5f, -0.5f, -0.5f,   0.85f, 0.35f, 0.25f,
-         0.5f, -0.5f, -0.5f,   0.85f, 0.35f, 0.25f,
-         0.5f,  0.5f, -0.5f,   0.85f, 0.35f, 0.25f,
-         0.5f,  0.5f, -0.5f,   0.85f, 0.35f, 0.25f,
-        -0.5f,  0.5f, -0.5f,   0.85f, 0.35f, 0.25f,
-        -0.5f, -0.5f, -0.5f,   0.85f, 0.35f, 0.25f,
+    constexpr int kChunkGridX = 8;
+    constexpr int kChunkGridY = 1;
+    constexpr int kChunkGridZ = 8;
 
-        -0.5f, -0.5f,  0.5f,   0.25f, 0.45f, 0.85f,
-         0.5f, -0.5f,  0.5f,   0.25f, 0.45f, 0.85f,
-         0.5f,  0.5f,  0.5f,   0.25f, 0.45f, 0.85f,
-         0.5f,  0.5f,  0.5f,   0.25f, 0.45f, 0.85f,
-        -0.5f,  0.5f,  0.5f,   0.25f, 0.45f, 0.85f,
-        -0.5f, -0.5f,  0.5f,   0.25f, 0.45f, 0.85f,
+    voxel::ChunkManager chunkManager;
+    voxel::ChunkMesher mesher;
 
-        -0.5f,  0.5f,  0.5f,   0.35f, 0.85f, 0.45f,
-        -0.5f,  0.5f, -0.5f,   0.35f, 0.85f, 0.45f,
-        -0.5f, -0.5f, -0.5f,   0.35f, 0.85f, 0.45f,
-        -0.5f, -0.5f, -0.5f,   0.35f, 0.85f, 0.45f,
-        -0.5f, -0.5f,  0.5f,   0.35f, 0.85f, 0.45f,
-        -0.5f,  0.5f,  0.5f,   0.35f, 0.85f, 0.45f,
+    const int startX = -(kChunkGridX / 2);
+    const int startY = 0;
+    const int startZ = -(kChunkGridZ / 2);
+    const int totalChunks = kChunkGridX * kChunkGridY * kChunkGridZ;
 
-         0.5f,  0.5f,  0.5f,   0.85f, 0.85f, 0.25f,
-         0.5f,  0.5f, -0.5f,   0.85f, 0.85f, 0.25f,
-         0.5f, -0.5f, -0.5f,   0.85f, 0.85f, 0.25f,
-         0.5f, -0.5f, -0.5f,   0.85f, 0.85f, 0.25f,
-         0.5f, -0.5f,  0.5f,   0.85f, 0.85f, 0.25f,
-         0.5f,  0.5f,  0.5f,   0.85f, 0.85f, 0.25f,
+    std::vector<ChunkRenderItem> renderItems;
+    renderItems.reserve(static_cast<size_t>(totalChunks));
 
-        -0.5f, -0.5f, -0.5f,   0.55f, 0.55f, 0.75f,
-         0.5f, -0.5f, -0.5f,   0.55f, 0.55f, 0.75f,
-         0.5f, -0.5f,  0.5f,   0.55f, 0.55f, 0.75f,
-         0.5f, -0.5f,  0.5f,   0.55f, 0.55f, 0.75f,
-        -0.5f, -0.5f,  0.5f,   0.55f, 0.55f, 0.75f,
-        -0.5f, -0.5f, -0.5f,   0.55f, 0.55f, 0.75f,
+    for (int y = 0; y < kChunkGridY; ++y) {
+        for (int z = 0; z < kChunkGridZ; ++z) {
+            for (int x = 0; x < kChunkGridX; ++x) {
+                voxel::ChunkCoord coord{startX + x, startY + y, startZ + z};
+                chunkManager.GetOrCreateChunk(coord);
+                renderItems.push_back({coord, {}});
+            }
+        }
+    }
 
-        -0.5f,  0.5f, -0.5f,   0.75f, 0.35f, 0.75f,
-         0.5f,  0.5f, -0.5f,   0.75f, 0.35f, 0.75f,
-         0.5f,  0.5f,  0.5f,   0.75f, 0.35f, 0.75f,
-         0.5f,  0.5f,  0.5f,   0.75f, 0.35f, 0.75f,
-        -0.5f,  0.5f,  0.5f,   0.75f, 0.35f, 0.75f,
-        -0.5f,  0.5f, -0.5f,   0.75f, 0.35f, 0.75f
-    };
-
-    GLuint vao = 0;
-    GLuint vbo = 0;
-    glGenVertexArrays(1, &vao);
-    glGenBuffers(1, &vbo);
-
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(cubeVertices), cubeVertices, GL_STATIC_DRAW);
-
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(0));
-
-    glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), reinterpret_cast<void*>(3 * sizeof(float)));
-
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
+    std::size_t totalVertices = 0;
+    std::size_t totalIndices = 0;
+    for (ChunkRenderItem& item : renderItems) {
+        const voxel::Chunk* chunk = chunkManager.TryGetChunk(item.coord);
+        if (!chunk) {
+            continue;
+        }
+        mesher.BuildMesh(item.coord, *chunk, chunkManager, item.mesh);
+        item.mesh.UploadToGpu();
+        totalVertices += item.mesh.VertexCount();
+        totalIndices += item.mesh.IndexCount();
+        std::cout << "[Chunk] Mesh " << item.coord.x << "," << item.coord.y << "," << item.coord.z
+                  << " vertices=" << item.mesh.VertexCount()
+                  << " triangles=" << (item.mesh.IndexCount() / 3) << '\n';
+    }
+    std::cout << "[World] Meshed " << renderItems.size() << " chunks"
+              << " totalVertices=" << totalVertices
+              << " totalTriangles=" << (totalIndices / 3) << '\n';
 
     auto lastTime = std::chrono::high_resolution_clock::now();
     auto fpsTimer = lastTime;
@@ -320,18 +309,18 @@ int main() {
         glfwGetFramebufferSize(window, &width, &height);
         float aspect = width > 0 && height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 
-        glm::mat4 projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 100.0f);
+        glm::mat4 projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 500.0f);
         glm::mat4 view = gCamera.getViewMatrix();
-        glm::mat4 model = glm::mat4(1.0f);
+        glm::vec3 lightDir = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
 
         shader.use();
         shader.setMat4("uProjection", projection);
         shader.setMat4("uView", view);
-        shader.setMat4("uModel", model);
+        shader.setVec3("uLightDir", lightDir);
 
-        glBindVertexArray(vao);
-        glDrawArrays(GL_TRIANGLES, 0, 36);
-        glBindVertexArray(0);
+        for (const ChunkRenderItem& item : renderItems) {
+            item.mesh.Draw();
+        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -348,8 +337,9 @@ int main() {
         }
     }
 
-    glDeleteBuffers(1, &vbo);
-    glDeleteVertexArrays(1, &vao);
+    for (ChunkRenderItem& item : renderItems) {
+        item.mesh.DestroyGpu();
+    }
 
     glfwDestroyWindow(window);
     glfwTerminate();

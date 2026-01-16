@@ -43,3 +43,8 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - World-to-chunk conversion uses mathematical floor division/modulo to keep negative coordinates stable:
   - `chunk = floor(world / CHUNK_SIZE)`
   - `local = floor_mod(world, CHUNK_SIZE)` in `[0..CHUNK_SIZE-1]`
+
+## Meshing v1 (PR-03)
+- Demo builds a grid of **8x1x8 chunks** centered around the origin.
+- CPU mesher emits faces only when the neighbor is AIR.
+- Missing neighbor chunks are treated as AIR during meshing so boundary faces are visible.

@@ -15,6 +15,7 @@ public:
     const Chunk* TryGetChunk(const ChunkCoord& coord) const;
 
     BlockId GetBlock(const WorldBlockCoord& world) const;
+    BlockId GetBlockOrAir(const WorldBlockCoord& world) const;
     void SetBlock(const WorldBlockCoord& world, BlockId id);
 
 private:
