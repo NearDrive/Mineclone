@@ -6,7 +6,7 @@
 
 namespace voxel {
 
-void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const ChunkManager& manager,
+void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const ChunkRegistry& registry,
                             ChunkMesh& mesh) const {
     mesh.Clear();
 
@@ -33,7 +33,7 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const C
                         world.y + face.neighborOffset.y,
                         world.z + face.neighborOffset.z};
 
-                    if (manager.GetBlockOrAir(neighbor) != kBlockAir) {
+                    if (registry.GetBlockOrAir(neighbor) != kBlockAir) {
                         continue;
                     }
 

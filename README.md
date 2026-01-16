@@ -33,8 +33,10 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - **ESC**: Release mouse capture
 - **Left click**: Re-capture mouse
 - **[ / ]**: Decrease/increase render radius (chunks)
+- **, / .**: Decrease/increase load radius (chunks)
 - **F1**: Toggle frustum culling
 - **F2**: Toggle distance culling
+- **F3**: Toggle streaming (pause/resume)
 
 ## Notes
 - The executable prints GPU vendor/renderer/version on startup.
@@ -56,3 +58,9 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - Chunk-level frustum culling (AABB vs frustum) and distance culling are enabled by default.
 - Render radius defaults to **8 chunks** using a Chebyshev distance in XZ from the camera chunk.
 - Window title shows live stats for loaded, drawn, culled chunks, and draw calls.
+
+## Streaming (PR-05)
+- Chunks are loaded/unloaded around the player in a square (Chebyshev) radius on the XZ plane (single Y layer).
+- **Load radius** defaults to **10 chunks**, **render radius** defaults to **8 chunks** (load radius clamps to render radius).
+- Per-frame budgets (defaults): **3** chunk creates, **2** chunk meshes, **3** GPU uploads.
+- Window title shows player chunk, loaded/GPU-ready counts, queue sizes, and budget usage.

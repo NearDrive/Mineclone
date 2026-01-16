@@ -59,6 +59,10 @@ add_executable(Mineclone
   src/voxel/ChunkMesh.h
   src/voxel/ChunkMesher.cpp
   src/voxel/ChunkMesher.h
+  src/voxel/ChunkRegistry.cpp
+  src/voxel/ChunkRegistry.h
+  src/voxel/ChunkStreaming.cpp
+  src/voxel/ChunkStreaming.h
   src/voxel/VoxelCoords.h
   src/voxel/WorldGen.cpp
   src/voxel/WorldGen.h
