@@ -125,3 +125,10 @@ void Shader::setMat4(const std::string& name, const glm::mat4& value) const {
         glUniformMatrix4fv(location, 1, GL_FALSE, &value[0][0]);
     }
 }
+
+void Shader::setVec3(const std::string& name, const glm::vec3& value) const {
+    GLint location = glGetUniformLocation(programId_, name.c_str());
+    if (location >= 0) {
+        glUniform3fv(location, 1, &value[0]);
+    }
+}

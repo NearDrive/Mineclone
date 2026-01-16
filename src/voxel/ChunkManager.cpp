@@ -35,6 +35,16 @@ BlockId ChunkManager::GetBlock(const WorldBlockCoord& world) const {
     return chunk->Get(local.x, local.y, local.z);
 }
 
+BlockId ChunkManager::GetBlockOrAir(const WorldBlockCoord& world) const {
+    ChunkCoord chunkCoord = WorldToChunkCoord(world, kChunkSize);
+    LocalCoord local = WorldToLocalCoord(world, kChunkSize);
+    const Chunk* chunk = TryGetChunk(chunkCoord);
+    if (!chunk) {
+        return kBlockAir;
+    }
+    return chunk->Get(local.x, local.y, local.z);
+}
+
 void ChunkManager::SetBlock(const WorldBlockCoord& world, BlockId id) {
     ChunkCoord chunkCoord = WorldToChunkCoord(world, kChunkSize);
     LocalCoord local = WorldToLocalCoord(world, kChunkSize);
