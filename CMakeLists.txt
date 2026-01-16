@@ -43,6 +43,15 @@ add_executable(Mineclone
   src/Shader.h
   src/Camera.cpp
   src/Camera.h
+  src/voxel/BlockId.h
+  src/voxel/Chunk.cpp
+  src/voxel/Chunk.h
+  src/voxel/ChunkCoord.h
+  src/voxel/ChunkManager.cpp
+  src/voxel/ChunkManager.h
+  src/voxel/VoxelCoords.h
+  src/voxel/WorldGen.cpp
+  src/voxel/WorldGen.h
 )
 
 target_include_directories(Mineclone PRIVATE
