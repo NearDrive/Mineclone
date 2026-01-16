@@ -36,3 +36,10 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 ## Notes
 - The executable prints GPU vendor/renderer/version on startup.
 - In Debug builds, OpenGL KHR_debug messages are enabled (notifications filtered out).
+
+## Voxel World (PR-02)
+- `BlockId` uses `uint16_t` with constants: AIR=0, STONE=1, DIRT=2.
+- `CHUNK_SIZE` is 32 (chunks are 32x32x32).
+- World-to-chunk conversion uses mathematical floor division/modulo to keep negative coordinates stable:
+  - `chunk = floor(world / CHUNK_SIZE)`
+  - `local = floor_mod(world, CHUNK_SIZE)` in `[0..CHUNK_SIZE-1]`

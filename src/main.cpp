@@ -13,6 +13,9 @@
 
 #include "Camera.h"
 #include "Shader.h"
+#include "voxel/Chunk.h"
+#include "voxel/ChunkManager.h"
+#include "voxel/VoxelCoords.h"
 
 namespace {
 constexpr int kWindowWidth = 1280;
@@ -64,6 +67,54 @@ void setMouseCapture(GLFWwindow* window, bool capture) {
 }
 
 #ifndef NDEBUG
+void runVoxelSanityChecks() {
+    using namespace voxel;
+
+    ChunkManager manager;
+    const int coordsToTest[] = {-33, -32, -1, 0, 31, 32, 33};
+
+    for (int value : coordsToTest) {
+        WorldBlockCoord world{value, value, value};
+        ChunkCoord chunk = WorldToChunkCoord(world, kChunkSize);
+        LocalCoord local = WorldToLocalCoord(world, kChunkSize);
+        WorldBlockCoord roundtrip = ChunkLocalToWorld(chunk, local, kChunkSize);
+        assert(world.x == roundtrip.x);
+        assert(world.y == roundtrip.y);
+        assert(world.z == roundtrip.z);
+    }
+
+    ChunkCoord originChunk{0, 0, 0};
+    LocalCoord minLocal{0, 0, 0};
+    LocalCoord maxLocal{kChunkSize - 1, kChunkSize - 1, kChunkSize - 1};
+    WorldBlockCoord worldMin = ChunkLocalToWorld(originChunk, minLocal, kChunkSize);
+    WorldBlockCoord worldMax = ChunkLocalToWorld(originChunk, maxLocal, kChunkSize);
+
+    manager.SetBlock(worldMin, kBlockStone);
+    manager.SetBlock(worldMax, kBlockDirt);
+    assert(manager.GetBlock(worldMin) == kBlockStone);
+    assert(manager.GetBlock(worldMax) == kBlockDirt);
+
+    WorldBlockCoord negativeWorld{-1, -1, -1};
+    ChunkCoord negativeChunk = WorldToChunkCoord(negativeWorld, kChunkSize);
+    LocalCoord negativeLocal = WorldToLocalCoord(negativeWorld, kChunkSize);
+    assert(negativeChunk.x == -1);
+    assert(negativeChunk.y == -1);
+    assert(negativeChunk.z == -1);
+    assert(negativeLocal.x == kChunkSize - 1);
+    assert(negativeLocal.y == kChunkSize - 1);
+    assert(negativeLocal.z == kChunkSize - 1);
+
+    manager.SetBlock(negativeWorld, kBlockDirt);
+    assert(manager.GetBlock(negativeWorld) == kBlockDirt);
+
+    WorldBlockCoord surface{0, 7, 0};
+    WorldBlockCoord underground{0, 0, 0};
+    assert(manager.GetBlock(surface) == kBlockDirt);
+    assert(manager.GetBlock(underground) == kBlockStone);
+
+    std::cout << "[Voxel] Sanity OK\n";
+}
+
 void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severity,
                             GLsizei length, const GLchar* message, const void* userParam) {
     (void)source;
@@ -83,6 +134,10 @@ void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severi
 } // namespace
 
 int main() {
+#ifndef NDEBUG
+    runVoxelSanityChecks();
+#endif
+
     glfwSetErrorCallback(glfwErrorCallback);
     if (!glfwInit()) {
         std::cerr << "[Init] Failed to initialize GLFW.\n";
