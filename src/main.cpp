@@ -5,16 +5,19 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 
 #include "Camera.h"
 #include "Shader.h"
+#include "core/WorkerPool.h"
 #include "math/Frustum.h"
 #include "voxel/Chunk.h"
 #include "voxel/ChunkBounds.h"
@@ -226,8 +229,17 @@ int main() {
     streamingConfig.maxChunkCreatesPerFrame = 3;
     streamingConfig.maxChunkMeshesPerFrame = 2;
     streamingConfig.maxGpuUploadsPerFrame = 3;
+    streamingConfig.workerThreads = 2;
 
     voxel::ChunkStreaming streaming(streamingConfig);
+    core::WorkerPool workerPool;
+    workerPool.Start(static_cast<std::size_t>(streamingConfig.workerThreads),
+                     streaming.GenerateQueue(),
+                     streaming.MeshQueue(),
+                     streaming.UploadQueue(),
+                     chunkRegistry,
+                     mesher);
+    streaming.SetWorkerThreads(workerPool.ThreadCount());
 
     auto lastTime = std::chrono::high_resolution_clock::now();
     auto fpsTimer = lastTime;
@@ -249,6 +261,9 @@ int main() {
     std::size_t lastDistanceCulled = 0;
     std::size_t lastDrawCalls = 0;
     std::size_t lastGpuReadyChunks = 0;
+    std::size_t lastGeneratedChunks = 0;
+    std::size_t lastMeshedChunks = 0;
+    std::size_t lastWorkerThreads = 0;
     std::size_t lastCreateQueue = 0;
     std::size_t lastMeshQueue = 0;
     std::size_t lastUploadQueue = 0;
@@ -393,9 +408,10 @@ int main() {
         std::size_t drawn = 0;
 
         const int renderRadiusChunks = streaming.RenderRadius();
-        for (const auto& [coord, entry] : chunkRegistry.Entries()) {
-            if (!entry.hasGpuMesh) {
-                continue;
+        chunkRegistry.ForEachEntry([&](const voxel::ChunkCoord& coord,
+                                       const std::shared_ptr<voxel::ChunkEntry>& entry) {
+            if (entry->gpuState.load(std::memory_order_acquire) != voxel::GpuState::Uploaded) {
+                return;
             }
 
             if (distanceCullingEnabled) {
@@ -403,7 +419,7 @@ int main() {
                 const int dz = std::abs(coord.z - cameraChunk.z);
                 if (std::max(dx, dz) > renderRadiusChunks) {
                     ++distanceCulled;
-                    continue;
+                    return;
                 }
             }
 
@@ -411,16 +427,18 @@ int main() {
                 const voxel::ChunkBounds bounds = voxel::GetChunkBounds(coord);
                 if (!frustum.IntersectsAabb(bounds.min, bounds.max)) {
                     ++frustumCulled;
-                    continue;
+                    return;
                 }
             }
 
-            entry.mesh.Draw();
+            entry->mesh.Draw();
             ++drawn;
-        }
+        });
 
         const voxel::ChunkStreamingStats& streamStats = streaming.Stats();
         lastLoadedChunks = streamStats.loadedChunks;
+        lastGeneratedChunks = streamStats.generatedChunksReady;
+        lastMeshedChunks = streamStats.meshedCpuReady;
         lastGpuReadyChunks = streamStats.gpuReadyChunks;
         lastCreateQueue = streamStats.createQueue;
         lastMeshQueue = streamStats.meshQueue;
@@ -432,6 +450,7 @@ int main() {
         lastFrustumCulled = frustumCulled;
         lastDistanceCulled = distanceCulled;
         lastDrawCalls = drawn;
+        lastWorkerThreads = streamStats.workerThreads;
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -445,6 +464,8 @@ int main() {
                   << " | FPS: " << std::fixed << std::setprecision(1) << fps
                   << " | PlayerChunk: (" << streamStats.playerChunk.x << "," << streamStats.playerChunk.z << ")"
                   << " | Loaded: " << lastLoadedChunks
+                  << " | Generated: " << lastGeneratedChunks
+                  << " | MeshedCPU: " << lastMeshedChunks
                   << " | GPU Ready: " << lastGpuReadyChunks
                   << " | Drawn: " << lastDrawnChunks
                   << " | FrustumCulled: " << lastFrustumCulled
@@ -452,6 +473,7 @@ int main() {
                   << " | DrawCalls: " << lastDrawCalls
                   << " | LoadQ: " << lastCreateQueue << "/" << lastMeshQueue << "/" << lastUploadQueue
                   << " | Budgets: " << lastCreates << "/" << lastMeshes << "/" << lastUploads
+                  << " | Workers: " << lastWorkerThreads
                   << " | Radii L/R: " << streaming.LoadRadius() << "/" << streaming.RenderRadius();
             glfwSetWindowTitle(window, title.str().c_str());
             fpsTimer = now;
@@ -459,6 +481,7 @@ int main() {
         }
     }
 
+    workerPool.Stop();
     chunkRegistry.DestroyAll();
 
     glfwDestroyWindow(window);

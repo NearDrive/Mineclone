@@ -4,71 +4,85 @@
 
 namespace voxel {
 
-ChunkEntry& ChunkRegistry::CreateChunk(const ChunkCoord& coord) {
-    auto [it, inserted] = entries_.emplace(coord, ChunkEntry{});
-    if (inserted || !it->second.hasChunkData) {
-        GenerateChunk(coord, it->second.chunk);
-        it->second.hasChunkData = true;
-        it->second.hasCpuMesh = false;
-        it->second.hasGpuMesh = false;
+std::shared_ptr<ChunkEntry> ChunkRegistry::GetOrCreateEntry(const ChunkCoord& coord) {
+    std::lock_guard<std::mutex> lock(entriesMutex_);
+    auto [it, inserted] = entries_.emplace(coord, std::make_shared<ChunkEntry>());
+    if (inserted) {
+        it->second->wanted.store(true);
     }
     return it->second;
 }
 
 void ChunkRegistry::RemoveChunk(const ChunkCoord& coord) {
-    auto it = entries_.find(coord);
-    if (it == entries_.end()) {
-        return;
+    std::shared_ptr<ChunkEntry> entry;
+    {
+        std::lock_guard<std::mutex> lock(entriesMutex_);
+        auto it = entries_.find(coord);
+        if (it == entries_.end()) {
+            return;
+        }
+        entry = it->second;
+        entries_.erase(it);
     }
 
-    it->second.mesh.DestroyGpu();
-    it->second.mesh.Clear();
-    entries_.erase(it);
+    entry->wanted.store(false);
+    entry->mesh.DestroyGpu();
+    entry->mesh.Clear();
+    entry->gpuState.store(GpuState::NotUploaded);
 }
 
 void ChunkRegistry::DestroyAll() {
-    for (auto& [coord, entry] : entries_) {
+    std::unordered_map<ChunkCoord, std::shared_ptr<ChunkEntry>, ChunkCoordHash> entriesCopy;
+    {
+        std::lock_guard<std::mutex> lock(entriesMutex_);
+        entriesCopy.swap(entries_);
+    }
+    for (auto& [coord, entry] : entriesCopy) {
         (void)coord;
-        entry.mesh.DestroyGpu();
+        entry->wanted.store(false);
+        entry->mesh.DestroyGpu();
     }
-    entries_.clear();
 }
 
-ChunkEntry* ChunkRegistry::TryGetEntry(const ChunkCoord& coord) {
+std::shared_ptr<ChunkEntry> ChunkRegistry::TryGetEntry(const ChunkCoord& coord) {
+    std::lock_guard<std::mutex> lock(entriesMutex_);
     auto it = entries_.find(coord);
     if (it == entries_.end()) {
         return nullptr;
     }
-    return &it->second;
+    return it->second;
 }
 
-const ChunkEntry* ChunkRegistry::TryGetEntry(const ChunkCoord& coord) const {
+std::shared_ptr<const ChunkEntry> ChunkRegistry::TryGetEntry(const ChunkCoord& coord) const {
+    std::lock_guard<std::mutex> lock(entriesMutex_);
     auto it = entries_.find(coord);
     if (it == entries_.end()) {
         return nullptr;
     }
-    return &it->second;
+    return it->second;
 }
 
 Chunk* ChunkRegistry::TryGetChunk(const ChunkCoord& coord) {
-    auto* entry = TryGetEntry(coord);
-    if (!entry || !entry->hasChunkData) {
+    auto entry = TryGetEntry(coord);
+    if (!entry || entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
         return nullptr;
     }
-    return &entry->chunk;
+    std::lock_guard<std::mutex> lock(entry->dataMutex);
+    return entry->chunk.get();
 }
 
 const Chunk* ChunkRegistry::TryGetChunk(const ChunkCoord& coord) const {
-    const auto* entry = TryGetEntry(coord);
-    if (!entry || !entry->hasChunkData) {
+    auto entry = TryGetEntry(coord);
+    if (!entry || entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
         return nullptr;
     }
-    return &entry->chunk;
+    std::lock_guard<std::mutex> lock(entry->dataMutex);
+    return entry->chunk.get();
 }
 
 bool ChunkRegistry::HasChunk(const ChunkCoord& coord) const {
-    auto it = entries_.find(coord);
-    return it != entries_.end() && it->second.hasChunkData;
+    auto entry = TryGetEntry(coord);
+    return entry && entry->generationState.load(std::memory_order_acquire) == GenerationState::Ready;
 }
 
 BlockId ChunkRegistry::GetBlock(const WorldBlockCoord& world) const {
@@ -94,30 +108,56 @@ BlockId ChunkRegistry::GetBlockOrAir(const WorldBlockCoord& world) const {
 void ChunkRegistry::SetBlock(const WorldBlockCoord& world, BlockId id) {
     ChunkCoord chunkCoord = WorldToChunkCoord(world, kChunkSize);
     LocalCoord local = WorldToLocalCoord(world, kChunkSize);
-    ChunkEntry& entry = CreateChunk(chunkCoord);
-    entry.chunk.Set(local.x, local.y, local.z, id);
+    auto entry = GetOrCreateEntry(chunkCoord);
+    if (entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
+        std::lock_guard<std::mutex> lock(entry->dataMutex);
+        if (!entry->chunk) {
+            entry->chunk = std::make_unique<Chunk>();
+            GenerateChunkData(chunkCoord, *entry->chunk);
+        }
+        entry->generationState.store(GenerationState::Ready, std::memory_order_release);
+    }
+    std::lock_guard<std::mutex> lock(entry->dataMutex);
+    entry->chunk->Set(local.x, local.y, local.z, id);
 }
 
 std::size_t ChunkRegistry::LoadedCount() const {
+    std::lock_guard<std::mutex> lock(entriesMutex_);
     return entries_.size();
 }
 
 std::size_t ChunkRegistry::GpuReadyCount() const {
     std::size_t ready = 0;
+    std::lock_guard<std::mutex> lock(entriesMutex_);
     for (const auto& [coord, entry] : entries_) {
         (void)coord;
-        if (entry.hasGpuMesh) {
+        if (entry->gpuState.load(std::memory_order_acquire) == GpuState::Uploaded) {
             ++ready;
         }
     }
     return ready;
 }
 
-const std::unordered_map<ChunkCoord, ChunkEntry, ChunkCoordHash>& ChunkRegistry::Entries() const {
-    return entries_;
+void ChunkRegistry::ForEachEntry(
+    const std::function<void(const ChunkCoord&, const std::shared_ptr<ChunkEntry>&)>& fn) const {
+    std::lock_guard<std::mutex> lock(entriesMutex_);
+    for (const auto& [coord, entry] : entries_) {
+        fn(coord, entry);
+    }
 }
 
-void ChunkRegistry::GenerateChunk(const ChunkCoord& coord, Chunk& chunk) {
+std::vector<std::shared_ptr<ChunkEntry>> ChunkRegistry::EntriesSnapshot() const {
+    std::vector<std::shared_ptr<ChunkEntry>> entries;
+    std::lock_guard<std::mutex> lock(entriesMutex_);
+    entries.reserve(entries_.size());
+    for (const auto& [coord, entry] : entries_) {
+        (void)coord;
+        entries.push_back(entry);
+    }
+    return entries;
+}
+
+void ChunkRegistry::GenerateChunkData(const ChunkCoord& coord, Chunk& chunk) {
     for (int z = 0; z < kChunkSize; ++z) {
         for (int y = 0; y < kChunkSize; ++y) {
             for (int x = 0; x < kChunkSize; ++x) {
