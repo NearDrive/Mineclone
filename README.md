@@ -32,6 +32,9 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - **Mouse**: Look around (FPS camera)
 - **ESC**: Release mouse capture
 - **Left click**: Re-capture mouse
+- **[ / ]**: Decrease/increase render radius (chunks)
+- **F1**: Toggle frustum culling
+- **F2**: Toggle distance culling
 
 ## Notes
 - The executable prints GPU vendor/renderer/version on startup.
@@ -48,3 +51,8 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - Demo builds a grid of **8x1x8 chunks** centered around the origin.
 - CPU mesher emits faces only when the neighbor is AIR.
 - Missing neighbor chunks are treated as AIR during meshing so boundary faces are visible.
+
+## Culling (PR-04)
+- Chunk-level frustum culling (AABB vs frustum) and distance culling are enabled by default.
+- Render radius defaults to **8 chunks** using a Chebyshev distance in XZ from the camera chunk.
+- Window title shows live stats for loaded, drawn, culled chunks, and draw calls.
