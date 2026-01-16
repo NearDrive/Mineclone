@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
+#include <memory>
 
 #include "voxel/ChunkMesher.h"
 #include "voxel/ChunkRegistry.h"
@@ -51,88 +53,18 @@ void ChunkStreaming::Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry
     stats_.uploadedThisFrame = 0;
 
     if (!config_.enabled) {
-        stats_.loadedChunks = registry.LoadedCount();
-        stats_.gpuReadyChunks = registry.GpuReadyCount();
-        stats_.createQueue = toCreate_.size();
-        stats_.meshQueue = toMesh_.size();
-        stats_.uploadQueue = toUpload_.size();
+        UpdateStats(registry);
         return;
     }
 
     BuildDesiredSet(playerChunk);
 
-    PruneQueue(toCreate_, scheduledCreate_);
-    PruneQueue(toMesh_, scheduledMesh_);
-    PruneQueue(toUpload_, scheduledUpload_);
-
     UnloadOutOfRange(registry);
     EnqueueMissing(registry);
-
-    while (stats_.createdThisFrame < config_.maxChunkCreatesPerFrame && !toCreate_.empty()) {
-        ChunkCoord coord = toCreate_.front();
-        toCreate_.pop_front();
-        scheduledCreate_.erase(coord);
-
-        if (!IsDesired(coord) || registry.HasChunk(coord)) {
-            continue;
-        }
-
-        registry.CreateChunk(coord);
-        ++stats_.createdThisFrame;
-
-        if (scheduledMesh_.insert(coord).second) {
-            toMesh_.push_back(coord);
-        }
-    }
-
-    while (stats_.meshedThisFrame < config_.maxChunkMeshesPerFrame && !toMesh_.empty()) {
-        ChunkCoord coord = toMesh_.front();
-        toMesh_.pop_front();
-        scheduledMesh_.erase(coord);
-
-        if (!IsDesired(coord)) {
-            continue;
-        }
-
-        ChunkEntry* entry = registry.TryGetEntry(coord);
-        if (!entry || !entry->hasChunkData || entry->hasCpuMesh) {
-            continue;
-        }
-
-        mesher.BuildMesh(coord, entry->chunk, registry, entry->mesh);
-        entry->hasCpuMesh = true;
-        entry->hasGpuMesh = false;
-        ++stats_.meshedThisFrame;
-
-        if (scheduledUpload_.insert(coord).second) {
-            toUpload_.push_back(coord);
-        }
-    }
-
-    while (stats_.uploadedThisFrame < config_.maxGpuUploadsPerFrame && !toUpload_.empty()) {
-        ChunkCoord coord = toUpload_.front();
-        toUpload_.pop_front();
-        scheduledUpload_.erase(coord);
-
-        if (!IsDesired(coord)) {
-            continue;
-        }
-
-        ChunkEntry* entry = registry.TryGetEntry(coord);
-        if (!entry || !entry->hasCpuMesh || entry->hasGpuMesh) {
-            continue;
-        }
-
-        entry->mesh.UploadToGpu();
-        entry->hasGpuMesh = true;
-        ++stats_.uploadedThisFrame;
-    }
-
-    stats_.loadedChunks = registry.LoadedCount();
-    stats_.gpuReadyChunks = registry.GpuReadyCount();
-    stats_.createQueue = toCreate_.size();
-    stats_.meshQueue = toMesh_.size();
-    stats_.uploadQueue = toUpload_.size();
+    ProcessUploads(registry);
+    UpdateStats(registry);
+    WarnIfQueuesLarge();
+    (void)mesher;
 }
 
 const ChunkStreamingConfig& ChunkStreaming::Config() const {
@@ -163,53 +95,167 @@ void ChunkStreaming::BuildDesiredSet(const ChunkCoord& playerChunk) {
     }
 }
 
-void ChunkStreaming::PruneQueue(std::deque<ChunkCoord>& queue,
-                               std::unordered_set<ChunkCoord, ChunkCoordHash>& scheduled) {
-    if (queue.empty()) {
-        return;
-    }
-
-    std::deque<ChunkCoord> filtered;
-    filtered.resize(0);
-    for (const ChunkCoord& coord : queue) {
-        if (IsDesired(coord)) {
-            filtered.push_back(coord);
-        } else {
-            scheduled.erase(coord);
-        }
-    }
-    queue.swap(filtered);
-}
-
 void ChunkStreaming::UnloadOutOfRange(ChunkRegistry& registry) {
     unloadList_.clear();
     unloadList_.reserve(registry.LoadedCount());
 
-    for (const auto& [coord, entry] : registry.Entries()) {
+    registry.ForEachEntry([&](const ChunkCoord& coord, const std::shared_ptr<ChunkEntry>& entry) {
         (void)entry;
         if (!IsDesired(coord)) {
             unloadList_.push_back(coord);
         }
-    }
+    });
 
     for (const ChunkCoord& coord : unloadList_) {
         registry.RemoveChunk(coord);
-        scheduledCreate_.erase(coord);
-        scheduledMesh_.erase(coord);
-        scheduledUpload_.erase(coord);
     }
 }
 
-void ChunkStreaming::EnqueueMissing(const ChunkRegistry& registry) {
+void ChunkStreaming::EnqueueMissing(ChunkRegistry& registry) {
+    int createBudget = config_.maxChunkCreatesPerFrame;
+    int meshBudget = config_.maxChunkMeshesPerFrame;
+
     for (const ChunkCoord& coord : desiredCoords_) {
-        if (!registry.HasChunk(coord) && scheduledCreate_.insert(coord).second) {
-            toCreate_.push_back(coord);
+        auto entry = registry.GetOrCreateEntry(coord);
+        entry->wanted.store(true);
+
+        if (createBudget > 0) {
+            GenerationState genExpected = GenerationState::NotScheduled;
+            if (entry->generationState.compare_exchange_strong(genExpected, GenerationState::Queued)) {
+                generateQueue_.push(GenerateJob{coord, entry});
+                ++stats_.createdThisFrame;
+                --createBudget;
+            }
+        }
+
+        if (meshBudget > 0 &&
+            entry->generationState.load(std::memory_order_acquire) == GenerationState::Ready) {
+            MeshingState meshExpected = MeshingState::NotScheduled;
+            if (entry->meshingState.compare_exchange_strong(meshExpected, MeshingState::Queued)) {
+                meshQueue_.push(MeshJob{coord, entry});
+                ++stats_.meshedThisFrame;
+                --meshBudget;
+            }
         }
     }
 }
 
 bool ChunkStreaming::IsDesired(const ChunkCoord& coord) const {
     return desiredSet_.contains(coord);
+}
+
+void ChunkStreaming::SetWorkerThreads(std::size_t workerThreads) {
+    config_.workerThreads = static_cast<int>(workerThreads);
+}
+
+core::ThreadSafeQueue<GenerateJob>& ChunkStreaming::GenerateQueue() {
+    return generateQueue_;
+}
+
+core::ThreadSafeQueue<MeshJob>& ChunkStreaming::MeshQueue() {
+    return meshQueue_;
+}
+
+core::ThreadSafeQueue<MeshReady>& ChunkStreaming::UploadQueue() {
+    return uploadQueue_;
+}
+
+void ChunkStreaming::ProcessUploads(ChunkRegistry& registry) {
+    while (stats_.uploadedThisFrame < config_.maxGpuUploadsPerFrame) {
+        MeshReady ready;
+        if (!uploadQueue_.try_pop(ready)) {
+            break;
+        }
+
+        auto entry = ready.entry.lock();
+        if (!entry || !entry->wanted.load()) {
+            std::cout << "[Streaming] Dropped mesh upload for unloaded chunk.\n";
+            if (entry) {
+                entry->gpuState.store(GpuState::NotUploaded, std::memory_order_release);
+                entry->meshingState.store(MeshingState::NotScheduled, std::memory_order_release);
+            }
+            continue;
+        }
+
+        if (!IsDesired(ready.coord)) {
+            std::cout << "[Streaming] Dropped mesh upload for out-of-range chunk.\n";
+            entry->gpuState.store(GpuState::NotUploaded, std::memory_order_release);
+            entry->meshingState.store(MeshingState::NotScheduled, std::memory_order_release);
+            continue;
+        }
+
+        if (entry->gpuState.load(std::memory_order_acquire) != GpuState::UploadQueued) {
+            continue;
+        }
+
+        entry->mesh.Clear();
+        entry->mesh.Vertices() = std::move(ready.cpuMesh->vertices);
+        entry->mesh.Indices() = std::move(ready.cpuMesh->indices);
+        entry->mesh.UploadToGpu();
+        entry->mesh.ClearCpu();
+        entry->gpuState.store(GpuState::Uploaded, std::memory_order_release);
+        ++stats_.uploadedThisFrame;
+    }
+}
+
+void ChunkStreaming::UpdateStats(const ChunkRegistry& registry) {
+    stats_.loadedChunks = 0;
+    stats_.generatedChunksReady = 0;
+    stats_.meshedCpuReady = 0;
+    stats_.gpuReadyChunks = 0;
+
+    registry.ForEachEntry([&](const ChunkCoord& coord, const std::shared_ptr<ChunkEntry>& entry) {
+        (void)coord;
+        ++stats_.loadedChunks;
+        if (entry->generationState.load(std::memory_order_acquire) == GenerationState::Ready) {
+            ++stats_.generatedChunksReady;
+        }
+        if (entry->meshingState.load(std::memory_order_acquire) == MeshingState::Ready) {
+            ++stats_.meshedCpuReady;
+        }
+        if (entry->gpuState.load(std::memory_order_acquire) == GpuState::Uploaded) {
+            ++stats_.gpuReadyChunks;
+        }
+    });
+
+    stats_.createQueue = generateQueue_.size();
+    stats_.meshQueue = meshQueue_.size();
+    stats_.uploadQueue = uploadQueue_.size();
+    stats_.workerThreads = static_cast<std::size_t>(config_.workerThreads);
+}
+
+void ChunkStreaming::WarnIfQueuesLarge() {
+    constexpr std::size_t kWarnThreshold = 256;
+    const std::size_t createSize = generateQueue_.size();
+    const std::size_t meshSize = meshQueue_.size();
+    const std::size_t uploadSize = uploadQueue_.size();
+
+    if (createSize > kWarnThreshold) {
+        if (!warnedGenerateQueue_) {
+            std::cout << "[Streaming] Warning: generate queue size " << createSize << ".\n";
+            warnedGenerateQueue_ = true;
+        }
+    } else {
+        warnedGenerateQueue_ = false;
+    }
+
+    if (meshSize > kWarnThreshold) {
+        if (!warnedMeshQueue_) {
+            std::cout << "[Streaming] Warning: mesh queue size " << meshSize << ".\n";
+            warnedMeshQueue_ = true;
+        }
+    } else {
+        warnedMeshQueue_ = false;
+    }
+
+    if (uploadSize > kWarnThreshold) {
+        if (!warnedUploadQueue_) {
+            std::cout << "[Streaming] Warning: upload queue size " << uploadSize << ".\n";
+            warnedUploadQueue_ = true;
+        }
+    } else {
+        warnedUploadQueue_ = false;
+    }
 }
 
 } // namespace voxel

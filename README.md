@@ -64,3 +64,12 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - **Load radius** defaults to **10 chunks**, **render radius** defaults to **8 chunks** (load radius clamps to render radius).
 - Per-frame budgets (defaults): **3** chunk creates, **2** chunk meshes, **3** GPU uploads.
 - Window title shows player chunk, loaded/GPU-ready counts, queue sizes, and budget usage.
+
+## Multithreaded Jobs (PR-06)
+- Chunk generation and CPU meshing run on worker threads; **all OpenGL work stays on the main thread**.
+- Default worker thread count: **2** (`ChunkStreamingConfig::workerThreads`).
+- Worker jobs:
+  - Generate chunk block data deterministically.
+  - Mesh CPU buffers (missing or not-yet-generated neighbors are treated as AIR).
+- Main thread uploads meshes to GPU with a per-frame budget.
+- Window title now shows generated/meshed/GPU-ready counts, queue sizes, and worker thread count.

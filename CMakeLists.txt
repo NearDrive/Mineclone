@@ -43,6 +43,9 @@ add_executable(Mineclone
   src/Shader.h
   src/Camera.cpp
   src/Camera.h
+  src/core/ThreadSafeQueue.h
+  src/core/WorkerPool.cpp
+  src/core/WorkerPool.h
   src/math/Frustum.cpp
   src/math/Frustum.h
   src/math/Plane.cpp
@@ -53,6 +56,7 @@ add_executable(Mineclone
   src/voxel/Chunk.h
   src/voxel/ChunkBounds.h
   src/voxel/ChunkCoord.h
+  src/voxel/ChunkJobs.h
   src/voxel/ChunkManager.cpp
   src/voxel/ChunkManager.h
   src/voxel/ChunkMesh.cpp

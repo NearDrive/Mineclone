@@ -17,6 +17,7 @@ struct VoxelVertex {
 class ChunkMesh {
 public:
     void Clear();
+    void ClearCpu();
     void Reserve(std::size_t vertexCount, std::size_t indexCount);
 
     std::vector<VoxelVertex>& Vertices();
@@ -26,6 +27,7 @@ public:
 
     std::size_t VertexCount() const;
     std::size_t IndexCount() const;
+    std::size_t GpuIndexCount() const;
 
     void UploadToGpu();
     void DestroyGpu();
@@ -37,6 +39,7 @@ private:
     GLuint vao_ = 0;
     GLuint vbo_ = 0;
     GLuint ebo_ = 0;
+    std::size_t gpuIndexCount_ = 0;
 };
 
 } // namespace voxel

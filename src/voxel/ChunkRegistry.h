@@ -1,32 +1,61 @@
 #pragma once
 
+#include <atomic>
 #include <cstddef>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <unordered_map>
+#include <vector>
 
 #include "voxel/BlockId.h"
 #include "voxel/Chunk.h"
 #include "voxel/ChunkCoord.h"
+#include "voxel/ChunkJobs.h"
 #include "voxel/ChunkMesh.h"
 #include "voxel/VoxelCoords.h"
 
 namespace voxel {
 
+enum class GenerationState {
+    NotScheduled,
+    Queued,
+    Generating,
+    Ready
+};
+
+enum class MeshingState {
+    NotScheduled,
+    Queued,
+    Meshing,
+    Ready
+};
+
+enum class GpuState {
+    NotUploaded,
+    UploadQueued,
+    Uploaded
+};
+
 struct ChunkEntry {
-    Chunk chunk;
     ChunkMesh mesh;
-    bool hasChunkData = false;
-    bool hasCpuMesh = false;
-    bool hasGpuMesh = false;
+
+    std::unique_ptr<Chunk> chunk;
+    std::atomic<GenerationState> generationState{GenerationState::NotScheduled};
+    std::atomic<MeshingState> meshingState{MeshingState::NotScheduled};
+    std::atomic<GpuState> gpuState{GpuState::NotUploaded};
+    std::atomic<bool> wanted{true};
+    mutable std::mutex dataMutex;
 };
 
 class ChunkRegistry {
 public:
-    ChunkEntry& CreateChunk(const ChunkCoord& coord);
+    std::shared_ptr<ChunkEntry> GetOrCreateEntry(const ChunkCoord& coord);
     void RemoveChunk(const ChunkCoord& coord);
     void DestroyAll();
 
-    ChunkEntry* TryGetEntry(const ChunkCoord& coord);
-    const ChunkEntry* TryGetEntry(const ChunkCoord& coord) const;
+    std::shared_ptr<ChunkEntry> TryGetEntry(const ChunkCoord& coord);
+    std::shared_ptr<const ChunkEntry> TryGetEntry(const ChunkCoord& coord) const;
 
     Chunk* TryGetChunk(const ChunkCoord& coord);
     const Chunk* TryGetChunk(const ChunkCoord& coord) const;
@@ -40,12 +69,14 @@ public:
     std::size_t LoadedCount() const;
     std::size_t GpuReadyCount() const;
 
-    const std::unordered_map<ChunkCoord, ChunkEntry, ChunkCoordHash>& Entries() const;
+    void ForEachEntry(const std::function<void(const ChunkCoord&, const std::shared_ptr<ChunkEntry>&)>& fn) const;
+    std::vector<std::shared_ptr<ChunkEntry>> EntriesSnapshot() const;
+
+    static void GenerateChunkData(const ChunkCoord& coord, Chunk& chunk);
 
 private:
-    void GenerateChunk(const ChunkCoord& coord, Chunk& chunk);
-
-    std::unordered_map<ChunkCoord, ChunkEntry, ChunkCoordHash> entries_;
+    mutable std::mutex entriesMutex_;
+    std::unordered_map<ChunkCoord, std::shared_ptr<ChunkEntry>, ChunkCoordHash> entries_;
 };
 
 } // namespace voxel

@@ -7,6 +7,12 @@ namespace voxel {
 void ChunkMesh::Clear() {
     vertices_.clear();
     indices_.clear();
+    gpuIndexCount_ = 0;
+}
+
+void ChunkMesh::ClearCpu() {
+    vertices_.clear();
+    indices_.clear();
 }
 
 void ChunkMesh::Reserve(std::size_t vertexCount, std::size_t indexCount) {
@@ -38,6 +44,10 @@ std::size_t ChunkMesh::IndexCount() const {
     return indices_.size();
 }
 
+std::size_t ChunkMesh::GpuIndexCount() const {
+    return gpuIndexCount_;
+}
+
 void ChunkMesh::UploadToGpu() {
     if (vao_ == 0) {
         glGenVertexArrays(1, &vao_);
@@ -58,6 +68,7 @@ void ChunkMesh::UploadToGpu() {
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indices_.size() * sizeof(std::uint32_t)),
                  indices_.data(), GL_STATIC_DRAW);
+    gpuIndexCount_ = indices_.size();
 
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(VoxelVertex), reinterpret_cast<void*>(0));
@@ -82,16 +93,17 @@ void ChunkMesh::DestroyGpu() {
         glDeleteVertexArrays(1, &vao_);
         vao_ = 0;
     }
+    gpuIndexCount_ = 0;
 }
 
 void ChunkMesh::Draw() const {
-    if (indices_.empty() || vao_ == 0) {
+    if (gpuIndexCount_ == 0 || vao_ == 0) {
         return;
     }
 
-    assert(indices_.size() % 3 == 0);
+    assert(gpuIndexCount_ % 3 == 0);
     glBindVertexArray(vao_);
-    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indices_.size()), GL_UNSIGNED_INT, nullptr);
+    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(gpuIndexCount_), GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);
 }
 
