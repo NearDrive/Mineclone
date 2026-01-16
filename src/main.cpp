@@ -12,16 +12,16 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <vector>
 
 #include "Camera.h"
 #include "Shader.h"
 #include "math/Frustum.h"
 #include "voxel/Chunk.h"
 #include "voxel/ChunkBounds.h"
-#include "voxel/ChunkManager.h"
 #include "voxel/ChunkMesh.h"
 #include "voxel/ChunkMesher.h"
+#include "voxel/ChunkRegistry.h"
+#include "voxel/ChunkStreaming.h"
 #include "voxel/VoxelCoords.h"
 
 namespace {
@@ -31,6 +31,9 @@ constexpr float kFov = 60.0f;
 constexpr int kRenderRadiusDefault = 8;
 constexpr int kRenderRadiusMin = 2;
 constexpr int kRenderRadiusMax = 32;
+constexpr int kLoadRadiusDefault = 10;
+constexpr int kLoadRadiusMin = kRenderRadiusMin;
+constexpr int kLoadRadiusMax = 48;
 
 Camera gCamera(glm::vec3(0.0f, 20.0f, 40.0f), -90.0f, -15.0f);
 bool gFirstMouse = true;
@@ -76,16 +79,11 @@ void setMouseCapture(GLFWwindow* window, bool capture) {
     }
 }
 
-struct ChunkRenderItem {
-    voxel::ChunkCoord coord;
-    voxel::ChunkMesh mesh;
-};
-
 #ifndef NDEBUG
 void runVoxelSanityChecks() {
     using namespace voxel;
 
-    ChunkManager manager;
+    ChunkRegistry registry;
     const int coordsToTest[] = {-33, -32, -1, 0, 31, 32, 33};
 
     for (int value : coordsToTest) {
@@ -104,10 +102,10 @@ void runVoxelSanityChecks() {
     WorldBlockCoord worldMin = ChunkLocalToWorld(originChunk, minLocal, kChunkSize);
     WorldBlockCoord worldMax = ChunkLocalToWorld(originChunk, maxLocal, kChunkSize);
 
-    manager.SetBlock(worldMin, kBlockStone);
-    manager.SetBlock(worldMax, kBlockDirt);
-    assert(manager.GetBlock(worldMin) == kBlockStone);
-    assert(manager.GetBlock(worldMax) == kBlockDirt);
+    registry.SetBlock(worldMin, kBlockStone);
+    registry.SetBlock(worldMax, kBlockDirt);
+    assert(registry.GetBlock(worldMin) == kBlockStone);
+    assert(registry.GetBlock(worldMax) == kBlockDirt);
 
     WorldBlockCoord negativeWorld{-1, -1, -1};
     ChunkCoord negativeChunk = WorldToChunkCoord(negativeWorld, kChunkSize);
@@ -119,13 +117,13 @@ void runVoxelSanityChecks() {
     assert(negativeLocal.y == kChunkSize - 1);
     assert(negativeLocal.z == kChunkSize - 1);
 
-    manager.SetBlock(negativeWorld, kBlockDirt);
-    assert(manager.GetBlock(negativeWorld) == kBlockDirt);
+    registry.SetBlock(negativeWorld, kBlockDirt);
+    assert(registry.GetBlock(negativeWorld) == kBlockDirt);
 
     WorldBlockCoord surface{0, 7, 0};
     WorldBlockCoord underground{0, 0, 0};
-    assert(manager.GetBlock(surface) == kBlockDirt);
-    assert(manager.GetBlock(underground) == kBlockStone);
+    assert(registry.GetBlock(surface) == kBlockDirt);
+    assert(registry.GetBlock(underground) == kBlockStone);
 
     std::cout << "[Voxel] Sanity OK\n";
 }
@@ -219,49 +217,17 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    constexpr int kChunkGridX = 8;
-    constexpr int kChunkGridY = 1;
-    constexpr int kChunkGridZ = 8;
-
-    voxel::ChunkManager chunkManager;
+    voxel::ChunkRegistry chunkRegistry;
     voxel::ChunkMesher mesher;
 
-    const int startX = -(kChunkGridX / 2);
-    const int startY = 0;
-    const int startZ = -(kChunkGridZ / 2);
-    const int totalChunks = kChunkGridX * kChunkGridY * kChunkGridZ;
+    voxel::ChunkStreamingConfig streamingConfig;
+    streamingConfig.renderRadius = kRenderRadiusDefault;
+    streamingConfig.loadRadius = kLoadRadiusDefault;
+    streamingConfig.maxChunkCreatesPerFrame = 3;
+    streamingConfig.maxChunkMeshesPerFrame = 2;
+    streamingConfig.maxGpuUploadsPerFrame = 3;
 
-    std::vector<ChunkRenderItem> renderItems;
-    renderItems.reserve(static_cast<size_t>(totalChunks));
-
-    for (int y = 0; y < kChunkGridY; ++y) {
-        for (int z = 0; z < kChunkGridZ; ++z) {
-            for (int x = 0; x < kChunkGridX; ++x) {
-                voxel::ChunkCoord coord{startX + x, startY + y, startZ + z};
-                chunkManager.GetOrCreateChunk(coord);
-                renderItems.push_back({coord, {}});
-            }
-        }
-    }
-
-    std::size_t totalVertices = 0;
-    std::size_t totalIndices = 0;
-    for (ChunkRenderItem& item : renderItems) {
-        const voxel::Chunk* chunk = chunkManager.TryGetChunk(item.coord);
-        if (!chunk) {
-            continue;
-        }
-        mesher.BuildMesh(item.coord, *chunk, chunkManager, item.mesh);
-        item.mesh.UploadToGpu();
-        totalVertices += item.mesh.VertexCount();
-        totalIndices += item.mesh.IndexCount();
-        std::cout << "[Chunk] Mesh " << item.coord.x << "," << item.coord.y << "," << item.coord.z
-                  << " vertices=" << item.mesh.VertexCount()
-                  << " triangles=" << (item.mesh.IndexCount() / 3) << '\n';
-    }
-    std::cout << "[World] Meshed " << renderItems.size() << " chunks"
-              << " totalVertices=" << totalVertices
-              << " totalTriangles=" << (totalIndices / 3) << '\n';
+    voxel::ChunkStreaming streaming(streamingConfig);
 
     auto lastTime = std::chrono::high_resolution_clock::now();
     auto fpsTimer = lastTime;
@@ -270,16 +236,25 @@ int main() {
     bool clickPressed = false;
     bool decreaseRadiusPressed = false;
     bool increaseRadiusPressed = false;
+    bool decreaseLoadRadiusPressed = false;
+    bool increaseLoadRadiusPressed = false;
+    bool streamingTogglePressed = false;
     bool frustumTogglePressed = false;
     bool distanceTogglePressed = false;
-    int renderRadiusChunks = kRenderRadiusDefault;
     bool frustumCullingEnabled = true;
     bool distanceCullingEnabled = true;
-    std::size_t lastLoadedChunks = renderItems.size();
+    std::size_t lastLoadedChunks = 0;
     std::size_t lastDrawnChunks = 0;
     std::size_t lastFrustumCulled = 0;
     std::size_t lastDistanceCulled = 0;
     std::size_t lastDrawCalls = 0;
+    std::size_t lastGpuReadyChunks = 0;
+    std::size_t lastCreateQueue = 0;
+    std::size_t lastMeshQueue = 0;
+    std::size_t lastUploadQueue = 0;
+    int lastCreates = 0;
+    int lastMeshes = 0;
+    int lastUploads = 0;
 
     while (!glfwWindowShouldClose(window)) {
         auto now = std::chrono::high_resolution_clock::now();
@@ -323,8 +298,9 @@ int main() {
         int decreaseState = glfwGetKey(window, GLFW_KEY_LEFT_BRACKET);
         if (decreaseState == GLFW_PRESS && !decreaseRadiusPressed) {
             decreaseRadiusPressed = true;
-            renderRadiusChunks = std::clamp(renderRadiusChunks - 1, kRenderRadiusMin, kRenderRadiusMax);
-            std::cout << "[Culling] Render radius set to " << renderRadiusChunks << " chunks.\n";
+            int newRadius = std::clamp(streaming.RenderRadius() - 1, kRenderRadiusMin, kRenderRadiusMax);
+            streaming.SetRenderRadius(newRadius);
+            std::cout << "[Culling] Render radius set to " << streaming.RenderRadius() << " chunks.\n";
         } else if (decreaseState == GLFW_RELEASE) {
             decreaseRadiusPressed = false;
         }
@@ -332,10 +308,40 @@ int main() {
         int increaseState = glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET);
         if (increaseState == GLFW_PRESS && !increaseRadiusPressed) {
             increaseRadiusPressed = true;
-            renderRadiusChunks = std::clamp(renderRadiusChunks + 1, kRenderRadiusMin, kRenderRadiusMax);
-            std::cout << "[Culling] Render radius set to " << renderRadiusChunks << " chunks.\n";
+            int newRadius = std::clamp(streaming.RenderRadius() + 1, kRenderRadiusMin, kRenderRadiusMax);
+            streaming.SetRenderRadius(newRadius);
+            std::cout << "[Culling] Render radius set to " << streaming.RenderRadius() << " chunks.\n";
         } else if (increaseState == GLFW_RELEASE) {
             increaseRadiusPressed = false;
+        }
+
+        int decreaseLoadState = glfwGetKey(window, GLFW_KEY_COMMA);
+        if (decreaseLoadState == GLFW_PRESS && !decreaseLoadRadiusPressed) {
+            decreaseLoadRadiusPressed = true;
+            int newRadius = std::clamp(streaming.LoadRadius() - 1, kLoadRadiusMin, kLoadRadiusMax);
+            streaming.SetLoadRadius(newRadius);
+            std::cout << "[Streaming] Load radius set to " << streaming.LoadRadius() << " chunks.\n";
+        } else if (decreaseLoadState == GLFW_RELEASE) {
+            decreaseLoadRadiusPressed = false;
+        }
+
+        int increaseLoadState = glfwGetKey(window, GLFW_KEY_PERIOD);
+        if (increaseLoadState == GLFW_PRESS && !increaseLoadRadiusPressed) {
+            increaseLoadRadiusPressed = true;
+            int newRadius = std::clamp(streaming.LoadRadius() + 1, kLoadRadiusMin, kLoadRadiusMax);
+            streaming.SetLoadRadius(newRadius);
+            std::cout << "[Streaming] Load radius set to " << streaming.LoadRadius() << " chunks.\n";
+        } else if (increaseLoadState == GLFW_RELEASE) {
+            increaseLoadRadiusPressed = false;
+        }
+
+        int streamingToggleState = glfwGetKey(window, GLFW_KEY_F3);
+        if (streamingToggleState == GLFW_PRESS && !streamingTogglePressed) {
+            streamingTogglePressed = true;
+            streaming.SetEnabled(!streaming.Enabled());
+            std::cout << "[Streaming] " << (streaming.Enabled() ? "Enabled" : "Paused") << ".\n";
+        } else if (streamingToggleState == GLFW_RELEASE) {
+            streamingTogglePressed = false;
         }
 
         int frustumToggleState = glfwGetKey(window, GLFW_KEY_F1);
@@ -380,15 +386,21 @@ int main() {
             static_cast<int>(std::floor(cameraPosition.y)),
             static_cast<int>(std::floor(cameraPosition.z))};
         const voxel::ChunkCoord cameraChunk = voxel::WorldToChunkCoord(cameraBlock, voxel::kChunkSize);
+        streaming.Tick(cameraChunk, chunkRegistry, mesher);
 
         std::size_t distanceCulled = 0;
         std::size_t frustumCulled = 0;
         std::size_t drawn = 0;
 
-        for (const ChunkRenderItem& item : renderItems) {
+        const int renderRadiusChunks = streaming.RenderRadius();
+        for (const auto& [coord, entry] : chunkRegistry.Entries()) {
+            if (!entry.hasGpuMesh) {
+                continue;
+            }
+
             if (distanceCullingEnabled) {
-                const int dx = std::abs(item.coord.x - cameraChunk.x);
-                const int dz = std::abs(item.coord.z - cameraChunk.z);
+                const int dx = std::abs(coord.x - cameraChunk.x);
+                const int dz = std::abs(coord.z - cameraChunk.z);
                 if (std::max(dx, dz) > renderRadiusChunks) {
                     ++distanceCulled;
                     continue;
@@ -396,17 +408,26 @@ int main() {
             }
 
             if (frustumCullingEnabled) {
-                const voxel::ChunkBounds bounds = voxel::GetChunkBounds(item.coord);
+                const voxel::ChunkBounds bounds = voxel::GetChunkBounds(coord);
                 if (!frustum.IntersectsAabb(bounds.min, bounds.max)) {
                     ++frustumCulled;
                     continue;
                 }
             }
 
-            item.mesh.Draw();
+            entry.mesh.Draw();
             ++drawn;
         }
 
+        const voxel::ChunkStreamingStats& streamStats = streaming.Stats();
+        lastLoadedChunks = streamStats.loadedChunks;
+        lastGpuReadyChunks = streamStats.gpuReadyChunks;
+        lastCreateQueue = streamStats.createQueue;
+        lastMeshQueue = streamStats.meshQueue;
+        lastUploadQueue = streamStats.uploadQueue;
+        lastCreates = streamStats.createdThisFrame;
+        lastMeshes = streamStats.meshedThisFrame;
+        lastUploads = streamStats.uploadedThisFrame;
         lastDrawnChunks = drawn;
         lastFrustumCulled = frustumCulled;
         lastDistanceCulled = distanceCulled;
@@ -422,21 +443,23 @@ int main() {
             std::ostringstream title;
             title << "Mineclone"
                   << " | FPS: " << std::fixed << std::setprecision(1) << fps
+                  << " | PlayerChunk: (" << streamStats.playerChunk.x << "," << streamStats.playerChunk.z << ")"
                   << " | Loaded: " << lastLoadedChunks
+                  << " | GPU Ready: " << lastGpuReadyChunks
                   << " | Drawn: " << lastDrawnChunks
                   << " | FrustumCulled: " << lastFrustumCulled
                   << " | DistCulled: " << lastDistanceCulled
                   << " | DrawCalls: " << lastDrawCalls
-                  << " | Radius: " << renderRadiusChunks;
+                  << " | LoadQ: " << lastCreateQueue << "/" << lastMeshQueue << "/" << lastUploadQueue
+                  << " | Budgets: " << lastCreates << "/" << lastMeshes << "/" << lastUploads
+                  << " | Radii L/R: " << streaming.LoadRadius() << "/" << streaming.RenderRadius();
             glfwSetWindowTitle(window, title.str().c_str());
             fpsTimer = now;
             frames = 0;
         }
     }
 
-    for (ChunkRenderItem& item : renderItems) {
-        item.mesh.DestroyGpu();
-    }
+    chunkRegistry.DestroyAll();
 
     glfwDestroyWindow(window);
     glfwTerminate();
