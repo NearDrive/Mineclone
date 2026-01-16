@@ -4,7 +4,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
@@ -14,7 +16,9 @@
 
 #include "Camera.h"
 #include "Shader.h"
+#include "math/Frustum.h"
 #include "voxel/Chunk.h"
+#include "voxel/ChunkBounds.h"
 #include "voxel/ChunkManager.h"
 #include "voxel/ChunkMesh.h"
 #include "voxel/ChunkMesher.h"
@@ -24,6 +28,9 @@ namespace {
 constexpr int kWindowWidth = 1280;
 constexpr int kWindowHeight = 720;
 constexpr float kFov = 60.0f;
+constexpr int kRenderRadiusDefault = 8;
+constexpr int kRenderRadiusMin = 2;
+constexpr int kRenderRadiusMax = 32;
 
 Camera gCamera(glm::vec3(0.0f, 20.0f, 40.0f), -90.0f, -15.0f);
 bool gFirstMouse = true;
@@ -261,6 +268,18 @@ int main() {
     int frames = 0;
     bool escPressed = false;
     bool clickPressed = false;
+    bool decreaseRadiusPressed = false;
+    bool increaseRadiusPressed = false;
+    bool frustumTogglePressed = false;
+    bool distanceTogglePressed = false;
+    int renderRadiusChunks = kRenderRadiusDefault;
+    bool frustumCullingEnabled = true;
+    bool distanceCullingEnabled = true;
+    std::size_t lastLoadedChunks = renderItems.size();
+    std::size_t lastDrawnChunks = 0;
+    std::size_t lastFrustumCulled = 0;
+    std::size_t lastDistanceCulled = 0;
+    std::size_t lastDrawCalls = 0;
 
     while (!glfwWindowShouldClose(window)) {
         auto now = std::chrono::high_resolution_clock::now();
@@ -301,6 +320,42 @@ int main() {
             clickPressed = false;
         }
 
+        int decreaseState = glfwGetKey(window, GLFW_KEY_LEFT_BRACKET);
+        if (decreaseState == GLFW_PRESS && !decreaseRadiusPressed) {
+            decreaseRadiusPressed = true;
+            renderRadiusChunks = std::clamp(renderRadiusChunks - 1, kRenderRadiusMin, kRenderRadiusMax);
+            std::cout << "[Culling] Render radius set to " << renderRadiusChunks << " chunks.\n";
+        } else if (decreaseState == GLFW_RELEASE) {
+            decreaseRadiusPressed = false;
+        }
+
+        int increaseState = glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET);
+        if (increaseState == GLFW_PRESS && !increaseRadiusPressed) {
+            increaseRadiusPressed = true;
+            renderRadiusChunks = std::clamp(renderRadiusChunks + 1, kRenderRadiusMin, kRenderRadiusMax);
+            std::cout << "[Culling] Render radius set to " << renderRadiusChunks << " chunks.\n";
+        } else if (increaseState == GLFW_RELEASE) {
+            increaseRadiusPressed = false;
+        }
+
+        int frustumToggleState = glfwGetKey(window, GLFW_KEY_F1);
+        if (frustumToggleState == GLFW_PRESS && !frustumTogglePressed) {
+            frustumTogglePressed = true;
+            frustumCullingEnabled = !frustumCullingEnabled;
+            std::cout << "[Culling] Frustum culling " << (frustumCullingEnabled ? "enabled" : "disabled") << ".\n";
+        } else if (frustumToggleState == GLFW_RELEASE) {
+            frustumTogglePressed = false;
+        }
+
+        int distanceToggleState = glfwGetKey(window, GLFW_KEY_F2);
+        if (distanceToggleState == GLFW_PRESS && !distanceTogglePressed) {
+            distanceTogglePressed = true;
+            distanceCullingEnabled = !distanceCullingEnabled;
+            std::cout << "[Culling] Distance culling " << (distanceCullingEnabled ? "enabled" : "disabled") << ".\n";
+        } else if (distanceToggleState == GLFW_RELEASE) {
+            distanceTogglePressed = false;
+        }
+
         glClearColor(0.08f, 0.10f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -311,6 +366,7 @@ int main() {
 
         glm::mat4 projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 500.0f);
         glm::mat4 view = gCamera.getViewMatrix();
+        const Frustum frustum = Frustum::FromMatrix(projection * view);
         glm::vec3 lightDir = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
 
         shader.use();
@@ -318,9 +374,43 @@ int main() {
         shader.setMat4("uView", view);
         shader.setVec3("uLightDir", lightDir);
 
+        const glm::vec3 cameraPosition = gCamera.getPosition();
+        voxel::WorldBlockCoord cameraBlock{
+            static_cast<int>(std::floor(cameraPosition.x)),
+            static_cast<int>(std::floor(cameraPosition.y)),
+            static_cast<int>(std::floor(cameraPosition.z))};
+        const voxel::ChunkCoord cameraChunk = voxel::WorldToChunkCoord(cameraBlock, voxel::kChunkSize);
+
+        std::size_t distanceCulled = 0;
+        std::size_t frustumCulled = 0;
+        std::size_t drawn = 0;
+
         for (const ChunkRenderItem& item : renderItems) {
+            if (distanceCullingEnabled) {
+                const int dx = std::abs(item.coord.x - cameraChunk.x);
+                const int dz = std::abs(item.coord.z - cameraChunk.z);
+                if (std::max(dx, dz) > renderRadiusChunks) {
+                    ++distanceCulled;
+                    continue;
+                }
+            }
+
+            if (frustumCullingEnabled) {
+                const voxel::ChunkBounds bounds = voxel::GetChunkBounds(item.coord);
+                if (!frustum.IntersectsAabb(bounds.min, bounds.max)) {
+                    ++frustumCulled;
+                    continue;
+                }
+            }
+
             item.mesh.Draw();
+            ++drawn;
         }
+
+        lastDrawnChunks = drawn;
+        lastFrustumCulled = frustumCulled;
+        lastDistanceCulled = distanceCulled;
+        lastDrawCalls = drawn;
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -330,7 +420,14 @@ int main() {
         if (fpsElapsed.count() >= 0.25f) {
             float fps = static_cast<float>(frames) / fpsElapsed.count();
             std::ostringstream title;
-            title << "Mineclone" << " | FPS: " << std::fixed << std::setprecision(1) << fps;
+            title << "Mineclone"
+                  << " | FPS: " << std::fixed << std::setprecision(1) << fps
+                  << " | Loaded: " << lastLoadedChunks
+                  << " | Drawn: " << lastDrawnChunks
+                  << " | FrustumCulled: " << lastFrustumCulled
+                  << " | DistCulled: " << lastDistanceCulled
+                  << " | DrawCalls: " << lastDrawCalls
+                  << " | Radius: " << renderRadiusChunks;
             glfwSetWindowTitle(window, title.str().c_str());
             fpsTimer = now;
             frames = 0;

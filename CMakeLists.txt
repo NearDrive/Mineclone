@@ -43,10 +43,15 @@ add_executable(Mineclone
   src/Shader.h
   src/Camera.cpp
   src/Camera.h
+  src/math/Frustum.cpp
+  src/math/Frustum.h
+  src/math/Plane.cpp
+  src/math/Plane.h
   src/voxel/BlockId.h
   src/voxel/BlockFaces.h
   src/voxel/Chunk.cpp
   src/voxel/Chunk.h
+  src/voxel/ChunkBounds.h
   src/voxel/ChunkCoord.h
   src/voxel/ChunkManager.cpp
   src/voxel/ChunkManager.h
