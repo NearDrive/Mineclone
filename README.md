@@ -28,11 +28,13 @@ cmake --build build -config Release
 On Windows, run the generated `Mineclone.exe` from the `build/` directory (or from Visual Studio's output directory). The build copies the `shaders/` folder next to the executable automatically.
 
 ## Controls
-- **W/A/S/D**: Move
+- **W/A/S/D**: Move (physics-driven)
 - **Mouse**: Look around (FPS camera)
+- **SPACE**: Jump (when grounded)
 - **ESC**: Release mouse capture
 - **Left click**: Re-capture mouse (when released) / break block (when captured)
 - **Right click**: Place block (adjacent to targeted face)
+- **R**: Reset player to spawn (debug builds)
 - **[ / ]**: Decrease/increase render radius (chunks)
 - **, / .**: Decrease/increase load radius (chunks)
 - **F1**: Toggle frustum culling
@@ -79,3 +81,9 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - Raycast reach distance: **6 blocks** (voxel DDA).
 - Targeted blocks show a highlighted wireframe outline.
 - Editing a block remeshes the impacted chunk and any touched neighbors.
+
+## Player Physics (PR-08)
+- Player collider: AABB **0.6w x 1.8h x 0.6d** (feet position origin).
+- Gravity: **-20.0 m/s²**
+- Jump impulse: **+8.0 m/s**
+- Move speed: **4.5 m/s** on XZ plane (camera yaw only).

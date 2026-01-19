@@ -18,6 +18,7 @@
 #include "Camera.h"
 #include "Shader.h"
 #include "core/WorkerPool.h"
+#include "game/Player.h"
 #include "math/Frustum.h"
 #include "renderer/DebugDraw.h"
 #include "voxel/Chunk.h"
@@ -42,8 +43,11 @@ constexpr int kLoadRadiusMin = kRenderRadiusMin;
 constexpr int kLoadRadiusMax = 48;
 constexpr float kReachDistance = 6.0f;
 constexpr float kHighlightEpsilon = 0.015f;
+constexpr float kMaxDeltaTime = 0.05f;
+const glm::vec3 kPlayerSpawn(0.0f, 20.0f, 0.0f);
+const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
 
-Camera gCamera(glm::vec3(0.0f, 20.0f, 40.0f), -90.0f, -15.0f);
+Camera gCamera(kPlayerSpawn + kEyeOffset, -90.0f, -15.0f);
 bool gFirstMouse = true;
 bool gMouseCaptured = true;
 float gLastX = static_cast<float>(kWindowWidth) / 2.0f;
@@ -288,25 +292,27 @@ int main() {
     int lastUploads = 0;
     voxel::RaycastHit currentHit;
     bool hasTarget = false;
+    bool spacePressed = false;
+#ifndef NDEBUG
+    bool resetPressed = false;
+#endif
+    auto lastClampLogTime = lastTime - std::chrono::seconds(1);
+    game::Player player(kPlayerSpawn);
 
     while (!glfwWindowShouldClose(window)) {
         auto now = std::chrono::high_resolution_clock::now();
         std::chrono::duration<float> delta = now - lastTime;
         float deltaTime = delta.count();
+        if (deltaTime > kMaxDeltaTime) {
+            std::chrono::duration<float> clampElapsed = now - lastClampLogTime;
+            if (clampElapsed.count() >= 1.0f) {
+                std::cout << "[Timing] Delta time clamped from " << deltaTime << " to " << kMaxDeltaTime << '\n';
+                lastClampLogTime = now;
+            }
+            deltaTime = kMaxDeltaTime;
+        }
         lastTime = now;
-
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-            gCamera.processKeyboard(Camera::Movement::Forward, deltaTime);
-        }
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-            gCamera.processKeyboard(Camera::Movement::Backward, deltaTime);
-        }
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-            gCamera.processKeyboard(Camera::Movement::Left, deltaTime);
-        }
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-            gCamera.processKeyboard(Camera::Movement::Right, deltaTime);
-        }
+        glm::vec3 desiredDir(0.0f);
 
         int escState = glfwGetKey(window, GLFW_KEY_ESCAPE);
         if (escState == GLFW_PRESS && !escPressed) {
@@ -385,6 +391,55 @@ int main() {
             distanceTogglePressed = false;
         }
 
+        if (gMouseCaptured) {
+            float yawRadians = glm::radians(gCamera.getYaw());
+            glm::vec3 forward(std::cos(yawRadians), 0.0f, std::sin(yawRadians));
+            glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
+
+            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+                desiredDir += forward;
+            }
+            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+                desiredDir -= forward;
+            }
+            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+                desiredDir -= right;
+            }
+            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+                desiredDir += right;
+            }
+        }
+
+        if (glm::length(desiredDir) > 0.0f) {
+            desiredDir = glm::normalize(desiredDir);
+        }
+
+        bool jumpPressed = false;
+        int spaceState = glfwGetKey(window, GLFW_KEY_SPACE);
+        if (spaceState == GLFW_PRESS && !spacePressed) {
+            spacePressed = true;
+            if (gMouseCaptured) {
+                jumpPressed = true;
+            }
+        } else if (spaceState == GLFW_RELEASE) {
+            spacePressed = false;
+        }
+
+#ifndef NDEBUG
+        int resetState = glfwGetKey(window, GLFW_KEY_R);
+        if (resetState == GLFW_PRESS && !resetPressed) {
+            resetPressed = true;
+            player.SetPosition(kPlayerSpawn);
+            player.ResetVelocity();
+            std::cout << "[Debug] Player reset to spawn.\n";
+        } else if (resetState == GLFW_RELEASE) {
+            resetPressed = false;
+        }
+#endif
+
+        player.Update(chunkRegistry, desiredDir, jumpPressed, deltaTime);
+        gCamera.setPosition(player.Position() + kEyeOffset);
+
         glClearColor(0.08f, 0.10f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -444,12 +499,13 @@ int main() {
         shader.setVec3("uLightDir", lightDir);
 
         const glm::vec3 cameraPosition = gCamera.getPosition();
-        voxel::WorldBlockCoord cameraBlock{
-            static_cast<int>(std::floor(cameraPosition.x)),
-            static_cast<int>(std::floor(cameraPosition.y)),
-            static_cast<int>(std::floor(cameraPosition.z))};
-        const voxel::ChunkCoord cameraChunk = voxel::WorldToChunkCoord(cameraBlock, voxel::kChunkSize);
-        streaming.Tick(cameraChunk, chunkRegistry, mesher);
+        const glm::vec3 playerPosition = player.Position();
+        voxel::WorldBlockCoord playerBlock{
+            static_cast<int>(std::floor(playerPosition.x)),
+            static_cast<int>(std::floor(playerPosition.y)),
+            static_cast<int>(std::floor(playerPosition.z))};
+        const voxel::ChunkCoord playerChunk = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
+        streaming.Tick(playerChunk, chunkRegistry, mesher);
 
         std::size_t distanceCulled = 0;
         std::size_t frustumCulled = 0;
@@ -463,8 +519,8 @@ int main() {
             }
 
             if (distanceCullingEnabled) {
-                const int dx = std::abs(coord.x - cameraChunk.x);
-                const int dz = std::abs(coord.z - cameraChunk.z);
+                const int dx = std::abs(coord.x - playerChunk.x);
+                const int dz = std::abs(coord.z - playerChunk.z);
                 if (std::max(dx, dz) > renderRadiusChunks) {
                     ++distanceCulled;
                     return;
@@ -517,9 +573,14 @@ int main() {
         std::chrono::duration<float> fpsElapsed = now - fpsTimer;
         if (fpsElapsed.count() >= 0.25f) {
             float fps = static_cast<float>(frames) / fpsElapsed.count();
+            auto round1 = [](float value) { return std::round(value * 10.0f) / 10.0f; };
             std::ostringstream title;
             title << "Mineclone"
                   << " | FPS: " << std::fixed << std::setprecision(1) << fps
+                  << " | Grounded: " << (player.Grounded() ? 1 : 0)
+                  << " | Pos: (" << round1(playerPosition.x) << "," << round1(playerPosition.y) << ","
+                  << round1(playerPosition.z) << ")"
+                  << " | Vy: " << std::setprecision(2) << player.Velocity().y
                   << " | PlayerChunk: (" << streamStats.playerChunk.x << "," << streamStats.playerChunk.z << ")"
                   << " | Loaded: " << lastLoadedChunks
                   << " | Generated: " << lastGeneratedChunks
