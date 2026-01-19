@@ -1,6 +1,6 @@
 #include "voxel/ChunkMesh.h"
 
-#include <cassert>
+#include "core/Assert.h"
 
 namespace voxel {
 
@@ -49,6 +49,7 @@ std::size_t ChunkMesh::GpuIndexCount() const {
 }
 
 void ChunkMesh::UploadToGpu() {
+    MC_ASSERT_MAIN_THREAD_GL();
     if (vao_ == 0) {
         glGenVertexArrays(1, &vao_);
     }
@@ -81,6 +82,7 @@ void ChunkMesh::UploadToGpu() {
 }
 
 void ChunkMesh::DestroyGpu() {
+    MC_ASSERT_MAIN_THREAD_GL();
     if (ebo_ != 0) {
         glDeleteBuffers(1, &ebo_);
         ebo_ = 0;
@@ -97,11 +99,12 @@ void ChunkMesh::DestroyGpu() {
 }
 
 void ChunkMesh::Draw() const {
+    MC_ASSERT_MAIN_THREAD_GL();
     if (gpuIndexCount_ == 0 || vao_ == 0) {
         return;
     }
 
-    assert(gpuIndexCount_ % 3 == 0);
+    MC_ASSERT(gpuIndexCount_ % 3 == 0, "Chunk mesh index count must be a multiple of 3.");
     glBindVertexArray(vao_);
     glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(gpuIndexCount_), GL_UNSIGNED_INT, nullptr);
     glBindVertexArray(0);

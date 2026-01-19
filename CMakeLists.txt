@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(MINECLONE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors." OFF)
+option(MINECLONE_SANITIZE "Enable Address/Undefined sanitizers in Debug for GCC/Clang." OFF)
+
+include(cmake/Sanitizers.cmake)
 include(FetchContent)
 
 FetchContent_Declare(
@@ -45,9 +49,14 @@ add_executable(Mineclone
   src/Camera.h
   src/game/Player.cpp
   src/game/Player.h
+  src/core/Assert.h
+  src/core/Cli.cpp
+  src/core/Cli.h
   src/core/ThreadSafeQueue.h
   src/core/Profiler.cpp
   src/core/Profiler.h
+  src/core/Verify.cpp
+  src/core/Verify.h
   src/core/WorkerPool.cpp
   src/core/WorkerPool.h
   src/math/Frustum.cpp
@@ -92,6 +101,20 @@ target_include_directories(Mineclone PRIVATE
 )
 
 target_link_libraries(Mineclone PRIVATE glfw glad glm)
+
+if (MSVC)
+  target_compile_options(Mineclone PRIVATE /W4 /permissive-)
+  if (MINECLONE_WARNINGS_AS_ERRORS)
+    target_compile_options(Mineclone PRIVATE /WX)
+  endif()
+else()
+  target_compile_options(Mineclone PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion)
+  if (MINECLONE_WARNINGS_AS_ERRORS)
+    target_compile_options(Mineclone PRIVATE -Werror)
+  endif()
+endif()
+
+mineclone_enable_sanitizers(Mineclone)
 
 if (WIN32)
   target_link_libraries(Mineclone PRIVATE opengl32)
