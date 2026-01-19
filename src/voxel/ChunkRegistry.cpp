@@ -1,5 +1,9 @@
 #include "voxel/ChunkRegistry.h"
 
+#include <shared_mutex>
+#include <utility>
+
+#include "persistence/ChunkStorage.h"
 #include "voxel/WorldGen.h"
 
 namespace voxel {
@@ -42,6 +46,71 @@ void ChunkRegistry::DestroyAll() {
         entry->wanted.store(false);
         entry->mesh.DestroyGpu();
     }
+}
+
+void ChunkRegistry::SetStorage(persistence::ChunkStorage* storage) {
+    storage_ = storage;
+}
+
+bool ChunkRegistry::SaveChunkIfDirty(const ChunkCoord& coord, persistence::ChunkStorage& storage) {
+    auto entry = TryGetEntry(coord);
+    if (!entry) {
+        return false;
+    }
+    if (!entry->dirty.load(std::memory_order_acquire)) {
+        return false;
+    }
+    if (entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
+        return false;
+    }
+
+    std::shared_lock<std::shared_mutex> lock(entry->dataMutex);
+    if (!entry->chunk) {
+        return false;
+    }
+    if (!entry->dirty.load(std::memory_order_acquire)) {
+        return false;
+    }
+    if (storage.SaveChunk(coord, *entry->chunk)) {
+        entry->dirty.store(false, std::memory_order_release);
+        return true;
+    }
+    return false;
+}
+
+std::size_t ChunkRegistry::SaveAllDirty(persistence::ChunkStorage& storage) {
+    std::size_t saved = 0;
+    std::vector<std::pair<ChunkCoord, std::shared_ptr<ChunkEntry>>> entries;
+    {
+        std::lock_guard<std::mutex> lock(entriesMutex_);
+        entries.reserve(entries_.size());
+        for (const auto& [coord, entry] : entries_) {
+            entries.emplace_back(coord, entry);
+        }
+    }
+    for (const auto& [coord, entry] : entries) {
+        if (!entry) {
+            continue;
+        }
+        if (!entry->dirty.load(std::memory_order_acquire)) {
+            continue;
+        }
+        if (entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
+            continue;
+        }
+        std::shared_lock<std::shared_mutex> lock(entry->dataMutex);
+        if (!entry->chunk) {
+            continue;
+        }
+        if (!entry->dirty.load(std::memory_order_acquire)) {
+            continue;
+        }
+        if (storage.SaveChunk(coord, *entry->chunk)) {
+            entry->dirty.store(false, std::memory_order_release);
+            ++saved;
+        }
+    }
+    return saved;
 }
 
 std::shared_ptr<ChunkEntry> ChunkRegistry::TryGetEntry(const ChunkCoord& coord) {
@@ -108,16 +177,24 @@ void ChunkRegistry::SetBlock(const WorldBlockCoord& world, BlockId id) {
     ChunkCoord chunkCoord = WorldToChunkCoord(world, kChunkSize);
     LocalCoord local = WorldToLocalCoord(world, kChunkSize);
     auto entry = GetOrCreateEntry(chunkCoord);
-    if (entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
-        std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
+    std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
+    if (entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready || !entry->chunk) {
         if (!entry->chunk) {
-            entry->chunk = std::make_unique<Chunk>();
-            GenerateChunkData(chunkCoord, *entry->chunk);
+            auto chunk = std::make_unique<Chunk>();
+            bool loaded = false;
+            if (storage_) {
+                loaded = storage_->LoadChunk(chunkCoord, *chunk);
+            }
+            if (!loaded) {
+                GenerateChunkData(chunkCoord, *chunk);
+            }
+            entry->chunk = std::move(chunk);
         }
         entry->generationState.store(GenerationState::Ready, std::memory_order_release);
+        entry->dirty.store(false, std::memory_order_release);
     }
-    std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
     entry->chunk->Set(local.x, local.y, local.z, id);
+    entry->dirty.store(true, std::memory_order_release);
 }
 
 std::size_t ChunkRegistry::LoadedCount() const {

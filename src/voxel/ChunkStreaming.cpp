@@ -4,6 +4,11 @@
 #include <cmath>
 #include <iostream>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
+
+#include "persistence/ChunkStorage.h"
+#include "voxel/Chunk.h"
 
 #include "voxel/ChunkMesher.h"
 #include "voxel/ChunkRegistry.h"
@@ -132,6 +137,9 @@ void ChunkStreaming::UnloadOutOfRange(ChunkRegistry& registry) {
     });
 
     for (const ChunkCoord& coord : unloadList_) {
+        if (storage_) {
+            registry.SaveChunkIfDirty(coord, *storage_);
+        }
         registry.RemoveChunk(coord);
     }
 }
@@ -146,8 +154,22 @@ void ChunkStreaming::EnqueueMissing(ChunkRegistry& registry) {
 
         if (createBudget > 0) {
             GenerationState genExpected = GenerationState::NotScheduled;
-            if (entry->generationState.compare_exchange_strong(genExpected, GenerationState::Queued)) {
-                generateQueue_.push(GenerateJob{coord, entry});
+            if (entry->generationState.compare_exchange_strong(genExpected, GenerationState::Generating)) {
+                bool loaded = false;
+                if (storage_) {
+                    voxel::Chunk chunk;
+                    if (storage_->LoadChunk(coord, chunk)) {
+                        std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
+                        entry->chunk = std::make_unique<voxel::Chunk>(std::move(chunk));
+                        entry->generationState.store(GenerationState::Ready, std::memory_order_release);
+                        entry->dirty.store(false, std::memory_order_release);
+                        loaded = true;
+                    }
+                }
+                if (!loaded) {
+                    entry->generationState.store(GenerationState::Queued, std::memory_order_release);
+                    generateQueue_.push(GenerateJob{coord, entry});
+                }
                 ++stats_.createdThisFrame;
                 --createBudget;
             }
@@ -171,6 +193,10 @@ bool ChunkStreaming::IsDesired(const ChunkCoord& coord) const {
 
 void ChunkStreaming::SetWorkerThreads(std::size_t workerThreads) {
     config_.workerThreads = static_cast<int>(workerThreads);
+}
+
+void ChunkStreaming::SetStorage(persistence::ChunkStorage* storage) {
+    storage_ = storage;
 }
 
 core::ThreadSafeQueue<GenerateJob>& ChunkStreaming::GenerateQueue() {

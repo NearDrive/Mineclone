@@ -9,6 +9,10 @@
 #include "voxel/ChunkCoord.h"
 #include "voxel/ChunkJobs.h"
 
+namespace persistence {
+class ChunkStorage;
+}
+
 namespace voxel {
 
 class ChunkMesher;
@@ -54,6 +58,7 @@ public:
     void Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry, const ChunkMesher& mesher);
     void SetProfiler(core::Profiler* profiler);
     void SetWorkerThreads(std::size_t workerThreads);
+    void SetStorage(persistence::ChunkStorage* storage);
 
     core::ThreadSafeQueue<GenerateJob>& GenerateQueue();
     core::ThreadSafeQueue<MeshJob>& MeshQueue();
@@ -86,6 +91,7 @@ private:
     core::ThreadSafeQueue<MeshReady> uploadQueue_;
 
     core::Profiler* profiler_ = nullptr;
+    persistence::ChunkStorage* storage_ = nullptr;
     bool warnedGenerateQueue_ = false;
     bool warnedMeshQueue_ = false;
     bool warnedUploadQueue_ = false;

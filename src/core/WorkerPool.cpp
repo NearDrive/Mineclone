@@ -107,6 +107,7 @@ void WorkerPool::ExecuteGenerate(const voxel::GenerateJob& job) {
     }
 
     entry->generationState.store(voxel::GenerationState::Ready, std::memory_order_release);
+    entry->dirty.store(false, std::memory_order_release);
 
     if (!entry->wanted.load()) {
         std::cout << "[Workers] Generated chunk then found it unloaded.\n";

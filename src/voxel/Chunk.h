@@ -19,6 +19,9 @@ public:
 
     void Fill(BlockId id);
 
+    const BlockId* Data() const { return blocks_.data(); }
+    BlockId* Data() { return blocks_.data(); }
+
 private:
     static constexpr std::size_t ToIndex(int lx, int ly, int lz) {
         return static_cast<std::size_t>(lx + kChunkSize * (ly + kChunkSize * lz));

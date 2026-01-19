@@ -21,6 +21,7 @@
 #include "core/WorkerPool.h"
 #include "game/Player.h"
 #include "math/Frustum.h"
+#include "persistence/ChunkStorage.h"
 #include "renderer/DebugDraw.h"
 #include "voxel/Chunk.h"
 #include "voxel/ChunkBounds.h"
@@ -242,6 +243,8 @@ int main() {
 
     voxel::ChunkRegistry chunkRegistry;
     voxel::ChunkMesher mesher;
+    persistence::ChunkStorage chunkStorage;
+    chunkRegistry.SetStorage(&chunkStorage);
 
     voxel::ChunkStreamingConfig streamingConfig;
     streamingConfig.renderRadius = kRenderRadiusDefault;
@@ -252,6 +255,7 @@ int main() {
     streamingConfig.workerThreads = 2;
 
     voxel::ChunkStreaming streaming(streamingConfig);
+    streaming.SetStorage(&chunkStorage);
     core::Profiler profiler;
     core::WorkerPool workerPool;
     workerPool.Start(static_cast<std::size_t>(streamingConfig.workerThreads),
@@ -275,6 +279,7 @@ int main() {
     bool decreaseLoadRadiusPressed = false;
     bool increaseLoadRadiusPressed = false;
     bool streamingTogglePressed = false;
+    bool savePressed = false;
     bool statsTogglePressed = false;
     bool statsPrintTogglePressed = false;
     bool frustumTogglePressed = false;
@@ -401,7 +406,16 @@ int main() {
                 statsPrintTogglePressed = false;
             }
 
-            int streamingToggleState = glfwGetKey(window, GLFW_KEY_F5);
+            int saveState = glfwGetKey(window, GLFW_KEY_F5);
+            if (saveState == GLFW_PRESS && !savePressed) {
+                savePressed = true;
+                std::size_t saved = chunkRegistry.SaveAllDirty(chunkStorage);
+                std::cout << "[Storage] Forced save of " << saved << " dirty chunk(s).\n";
+            } else if (saveState == GLFW_RELEASE) {
+                savePressed = false;
+            }
+
+            int streamingToggleState = glfwGetKey(window, GLFW_KEY_F6);
             if (streamingToggleState == GLFW_PRESS && !streamingTogglePressed) {
                 streamingTogglePressed = true;
                 streaming.SetEnabled(!streaming.Enabled());
@@ -679,6 +693,7 @@ int main() {
     }
 
     workerPool.Stop();
+    chunkRegistry.SaveAllDirty(chunkStorage);
     chunkRegistry.DestroyAll();
 
     glfwDestroyWindow(window);
