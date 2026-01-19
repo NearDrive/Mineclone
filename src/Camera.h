@@ -25,6 +25,8 @@ public:
     const glm::vec3& getPosition() const { return position_; }
     const glm::vec3& getFront() const { return front_; }
 
+    void setPosition(const glm::vec3& position) { position_ = position; }
+
     void setMovementSpeed(float speed) { movementSpeed_ = speed; }
     void setMouseSensitivity(float sensitivity) { mouseSensitivity_ = sensitivity; }
 

@@ -43,6 +43,8 @@ add_executable(Mineclone
   src/Shader.h
   src/Camera.cpp
   src/Camera.h
+  src/game/Player.cpp
+  src/game/Player.h
   src/core/ThreadSafeQueue.h
   src/core/WorkerPool.cpp
   src/core/WorkerPool.h
@@ -50,6 +52,8 @@ add_executable(Mineclone
   src/math/Frustum.h
   src/math/Plane.cpp
   src/math/Plane.h
+  src/physics/VoxelCollision.cpp
+  src/physics/VoxelCollision.h
   src/renderer/DebugDraw.cpp
   src/renderer/DebugDraw.h
   src/voxel/BlockId.h
