@@ -54,6 +54,9 @@ add_executable(Mineclone
   src/math/Frustum.h
   src/math/Plane.cpp
   src/math/Plane.h
+  src/persistence/ChunkFormat.h
+  src/persistence/ChunkStorage.cpp
+  src/persistence/ChunkStorage.h
   src/physics/VoxelCollision.cpp
   src/physics/VoxelCollision.h
   src/renderer/DebugDraw.cpp

@@ -16,6 +16,10 @@
 #include "voxel/ChunkMesh.h"
 #include "voxel/VoxelCoords.h"
 
+namespace persistence {
+class ChunkStorage;
+}
+
 namespace voxel {
 
 enum class GenerationState {
@@ -45,6 +49,7 @@ struct ChunkEntry {
     std::atomic<GenerationState> generationState{GenerationState::NotScheduled};
     std::atomic<MeshingState> meshingState{MeshingState::NotScheduled};
     std::atomic<GpuState> gpuState{GpuState::NotUploaded};
+    std::atomic<bool> dirty{false};
     std::atomic<bool> wanted{true};
     mutable std::shared_mutex dataMutex;
 };
@@ -62,6 +67,10 @@ public:
     std::shared_ptr<ChunkEntry> GetOrCreateEntry(const ChunkCoord& coord);
     void RemoveChunk(const ChunkCoord& coord);
     void DestroyAll();
+
+    void SetStorage(persistence::ChunkStorage* storage);
+    bool SaveChunkIfDirty(const ChunkCoord& coord, persistence::ChunkStorage& storage);
+    std::size_t SaveAllDirty(persistence::ChunkStorage& storage);
 
     std::shared_ptr<ChunkEntry> TryGetEntry(const ChunkCoord& coord);
     std::shared_ptr<const ChunkEntry> TryGetEntry(const ChunkCoord& coord) const;
@@ -85,6 +94,7 @@ public:
 private:
     mutable std::mutex entriesMutex_;
     std::unordered_map<ChunkCoord, std::shared_ptr<ChunkEntry>, ChunkCoordHash> entries_;
+    persistence::ChunkStorage* storage_ = nullptr;
 };
 
 } // namespace voxel

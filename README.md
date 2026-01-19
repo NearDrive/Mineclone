@@ -41,7 +41,8 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - **F2**: Toggle distance culling
 - **F3**: Toggle performance stats in window title
 - **F4**: Toggle periodic perf logging to stdout
-- **F5**: Toggle streaming (pause/resume)
+- **F5**: Force-save all dirty loaded chunks
+- **F6**: Toggle streaming (pause/resume)
 
 ## Notes
 - The executable prints GPU vendor/renderer/version on startup.
@@ -97,3 +98,9 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
   - **gen / mesh**: average ms per completed worker job with job counts per window.
   - **loaded / gpu / queues / drawn**: streaming and render counts for quick context.
 - The optional stdout report prints a one-line summary every ~5s when enabled.
+
+## Chunk Persistence (PR-10)
+- Saves are written under `./saves/world_0/` (relative to the executable working directory).
+- Each chunk is stored as `chunk_<cx>_<cy>_<cz>.bin` with format version **1**.
+- Chunks are saved on unload and when forcing a save with **F5** (also on shutdown).
+- Chunks load from disk before falling back to deterministic generation if a valid file exists.
