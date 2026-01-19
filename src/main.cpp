@@ -19,12 +19,15 @@
 #include "Shader.h"
 #include "core/WorkerPool.h"
 #include "math/Frustum.h"
+#include "renderer/DebugDraw.h"
 #include "voxel/Chunk.h"
 #include "voxel/ChunkBounds.h"
 #include "voxel/ChunkMesh.h"
 #include "voxel/ChunkMesher.h"
 #include "voxel/ChunkRegistry.h"
 #include "voxel/ChunkStreaming.h"
+#include "voxel/BlockEdit.h"
+#include "voxel/Raycast.h"
 #include "voxel/VoxelCoords.h"
 
 namespace {
@@ -37,6 +40,8 @@ constexpr int kRenderRadiusMax = 32;
 constexpr int kLoadRadiusDefault = 10;
 constexpr int kLoadRadiusMin = kRenderRadiusMin;
 constexpr int kLoadRadiusMax = 48;
+constexpr float kReachDistance = 6.0f;
+constexpr float kHighlightEpsilon = 0.015f;
 
 Camera gCamera(glm::vec3(0.0f, 20.0f, 40.0f), -90.0f, -15.0f);
 bool gFirstMouse = true;
@@ -220,6 +225,16 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    Shader debugShader;
+    if (!debugShader.loadFromFiles("shaders/debug_line.vert", "shaders/debug_line.frag", shaderError)) {
+        std::cerr << "[Shader] " << shaderError << '\n';
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
+
+    DebugDraw debugDraw;
+
     voxel::ChunkRegistry chunkRegistry;
     voxel::ChunkMesher mesher;
 
@@ -245,7 +260,8 @@ int main() {
     auto fpsTimer = lastTime;
     int frames = 0;
     bool escPressed = false;
-    bool clickPressed = false;
+    bool leftClickPressed = false;
+    bool rightClickPressed = false;
     bool decreaseRadiusPressed = false;
     bool increaseRadiusPressed = false;
     bool decreaseLoadRadiusPressed = false;
@@ -270,6 +286,8 @@ int main() {
     int lastCreates = 0;
     int lastMeshes = 0;
     int lastUploads = 0;
+    voxel::RaycastHit currentHit;
+    bool hasTarget = false;
 
     while (!glfwWindowShouldClose(window)) {
         auto now = std::chrono::high_resolution_clock::now();
@@ -298,16 +316,6 @@ int main() {
             }
         } else if (escState == GLFW_RELEASE) {
             escPressed = false;
-        }
-
-        int clickState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
-        if (clickState == GLFW_PRESS && !clickPressed) {
-            clickPressed = true;
-            if (!gMouseCaptured) {
-                setMouseCapture(window, true);
-            }
-        } else if (clickState == GLFW_RELEASE) {
-            clickPressed = false;
         }
 
         int decreaseState = glfwGetKey(window, GLFW_KEY_LEFT_BRACKET);
@@ -390,6 +398,46 @@ int main() {
         const Frustum frustum = Frustum::FromMatrix(projection * view);
         glm::vec3 lightDir = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
 
+        currentHit = {};
+        hasTarget = false;
+        debugDraw.Clear();
+        if (gMouseCaptured) {
+            currentHit = voxel::RaycastBlocks(chunkRegistry, gCamera.getPosition(), gCamera.getFront(), kReachDistance);
+            if (currentHit.hit) {
+                hasTarget = true;
+                const glm::vec3 min = glm::vec3(currentHit.block) - glm::vec3(kHighlightEpsilon);
+                const glm::vec3 max = glm::vec3(currentHit.block) + glm::vec3(1.0f + kHighlightEpsilon);
+                debugDraw.UpdateCube(min, max);
+            }
+        }
+
+        int leftState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+        if (leftState == GLFW_PRESS && !leftClickPressed) {
+            leftClickPressed = true;
+            if (!gMouseCaptured) {
+                setMouseCapture(window, true);
+            } else if (hasTarget) {
+                voxel::WorldBlockCoord target{currentHit.block.x, currentHit.block.y, currentHit.block.z};
+                voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockAir);
+            }
+        } else if (leftState == GLFW_RELEASE) {
+            leftClickPressed = false;
+        }
+
+        int rightState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
+        if (rightState == GLFW_PRESS && !rightClickPressed) {
+            rightClickPressed = true;
+            if (gMouseCaptured && hasTarget && currentHit.normal != glm::ivec3(0)) {
+                glm::ivec3 placeBlock = currentHit.block + currentHit.normal;
+                voxel::WorldBlockCoord target{placeBlock.x, placeBlock.y, placeBlock.z};
+                if (chunkRegistry.GetBlockOrAir(target) == voxel::kBlockAir) {
+                    voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockDirt);
+                }
+            }
+        } else if (rightState == GLFW_RELEASE) {
+            rightClickPressed = false;
+        }
+
         shader.use();
         shader.setMat4("uProjection", projection);
         shader.setMat4("uView", view);
@@ -435,6 +483,16 @@ int main() {
             ++drawn;
         });
 
+        if (debugDraw.HasGeometry()) {
+            debugShader.use();
+            debugShader.setMat4("uProjection", projection);
+            debugShader.setMat4("uView", view);
+            debugShader.setVec3("uColor", glm::vec3(1.0f, 0.95f, 0.2f));
+            glLineWidth(2.0f);
+            debugDraw.Draw();
+            glLineWidth(1.0f);
+        }
+
         const voxel::ChunkStreamingStats& streamStats = streaming.Stats();
         lastLoadedChunks = streamStats.loadedChunks;
         lastGeneratedChunks = streamStats.generatedChunksReady;
@@ -475,6 +533,10 @@ int main() {
                   << " | Budgets: " << lastCreates << "/" << lastMeshes << "/" << lastUploads
                   << " | Workers: " << lastWorkerThreads
                   << " | Radii L/R: " << streaming.LoadRadius() << "/" << streaming.RenderRadius();
+            if (hasTarget) {
+                title << " | Target: (" << currentHit.block.x << "," << currentHit.block.y << ","
+                      << currentHit.block.z << ")";
+            }
             glfwSetWindowTitle(window, title.str().c_str());
             fpsTimer = now;
             frames = 0;

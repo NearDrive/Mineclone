@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <iostream>
+#include <shared_mutex>
 
 #include "voxel/ChunkMesher.h"
 #include "voxel/ChunkRegistry.h"
@@ -98,7 +99,7 @@ void WorkerPool::ExecuteGenerate(const voxel::GenerateJob& job) {
     voxel::ChunkRegistry::GenerateChunkData(job.coord, chunk);
 
     {
-        std::lock_guard<std::mutex> lock(entry->dataMutex);
+        std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
         entry->chunk = std::make_unique<voxel::Chunk>(std::move(chunk));
     }
 
@@ -131,11 +132,8 @@ void WorkerPool::ExecuteMesh(const voxel::MeshJob& job) {
         return;
     }
 
-    const voxel::Chunk* chunk = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(entry->dataMutex);
-        chunk = entry->chunk.get();
-    }
+    std::shared_lock<std::shared_mutex> chunkLock(entry->dataMutex);
+    const voxel::Chunk* chunk = entry->chunk.get();
     if (!chunk) {
         entry->meshingState.store(voxel::MeshingState::NotScheduled);
         std::cout << "[Workers] Mesh job skipped; chunk missing.\n";

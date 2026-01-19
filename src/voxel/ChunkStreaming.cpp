@@ -75,6 +75,27 @@ const ChunkStreamingStats& ChunkStreaming::Stats() const {
     return stats_;
 }
 
+bool ChunkStreaming::RequestRemesh(const ChunkCoord& coord, ChunkRegistry& registry) {
+    auto entry = registry.TryGetEntry(coord);
+    if (!entry || !entry->wanted.load()) {
+        return false;
+    }
+
+    if (entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
+        return false;
+    }
+
+    MeshingState state = entry->meshingState.load(std::memory_order_acquire);
+    while (state == MeshingState::NotScheduled || state == MeshingState::Ready) {
+        if (entry->meshingState.compare_exchange_weak(state, MeshingState::Queued)) {
+            meshQueue_.push(MeshJob{coord, entry});
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void ChunkStreaming::BuildDesiredSet(const ChunkCoord& playerChunk) {
     const int radius = config_.loadRadius;
     const std::size_t capacity = static_cast<std::size_t>((radius * 2 + 1) * (radius * 2 + 1));
