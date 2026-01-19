@@ -1,3 +1,5 @@
+#include <glad/glad.h>
+
 #include "renderer/DebugDraw.h"
 
 DebugDraw::DebugDraw() {
