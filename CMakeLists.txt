@@ -46,6 +46,8 @@ add_executable(Mineclone
   src/game/Player.cpp
   src/game/Player.h
   src/core/ThreadSafeQueue.h
+  src/core/Profiler.cpp
+  src/core/Profiler.h
   src/core/WorkerPool.cpp
   src/core/WorkerPool.h
   src/math/Frustum.cpp

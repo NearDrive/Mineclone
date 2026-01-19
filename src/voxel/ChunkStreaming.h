@@ -4,6 +4,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "core/Profiler.h"
 #include "core/ThreadSafeQueue.h"
 #include "voxel/ChunkCoord.h"
 #include "voxel/ChunkJobs.h"
@@ -51,6 +52,7 @@ public:
     bool Enabled() const;
 
     void Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry, const ChunkMesher& mesher);
+    void SetProfiler(core::Profiler* profiler);
     void SetWorkerThreads(std::size_t workerThreads);
 
     core::ThreadSafeQueue<GenerateJob>& GenerateQueue();
@@ -83,6 +85,7 @@ private:
     core::ThreadSafeQueue<MeshJob> meshQueue_;
     core::ThreadSafeQueue<MeshReady> uploadQueue_;
 
+    core::Profiler* profiler_ = nullptr;
     bool warnedGenerateQueue_ = false;
     bool warnedMeshQueue_ = false;
     bool warnedUploadQueue_ = false;

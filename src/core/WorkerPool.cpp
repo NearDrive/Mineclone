@@ -14,7 +14,8 @@ void WorkerPool::Start(std::size_t threadCount,
                        ThreadSafeQueue<voxel::MeshJob>& meshQueue,
                        ThreadSafeQueue<voxel::MeshReady>& readyQueue,
                        voxel::ChunkRegistry& registry,
-                       const voxel::ChunkMesher& mesher) {
+                       const voxel::ChunkMesher& mesher,
+                       core::Profiler* profiler) {
     Stop();
 
     stop_.store(false);
@@ -23,6 +24,7 @@ void WorkerPool::Start(std::size_t threadCount,
     readyQueue_ = &readyQueue;
     registry_ = &registry;
     mesher_ = &mesher;
+    profiler_ = profiler;
 
     threads_.reserve(threadCount);
     for (std::size_t i = 0; i < threadCount; ++i) {
@@ -80,6 +82,7 @@ void WorkerPool::WorkerLoop() {
 }
 
 void WorkerPool::ExecuteGenerate(const voxel::GenerateJob& job) {
+    core::ScopedTimer timer(profiler_, core::Metric::Generate);
     auto entry = job.entry.lock();
     if (!entry) {
         std::cout << "[Workers] Dropped generate job for expired chunk.\n";
@@ -111,6 +114,7 @@ void WorkerPool::ExecuteGenerate(const voxel::GenerateJob& job) {
 }
 
 void WorkerPool::ExecuteMesh(const voxel::MeshJob& job) {
+    core::ScopedTimer timer(profiler_, core::Metric::Mesh);
     auto entry = job.entry.lock();
     if (!entry) {
         std::cout << "[Workers] Dropped mesh job for expired chunk.\n";

@@ -67,6 +67,10 @@ void ChunkStreaming::Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry
     (void)mesher;
 }
 
+void ChunkStreaming::SetProfiler(core::Profiler* profiler) {
+    profiler_ = profiler;
+}
+
 const ChunkStreamingConfig& ChunkStreaming::Config() const {
     return config_;
 }
@@ -182,6 +186,7 @@ core::ThreadSafeQueue<MeshReady>& ChunkStreaming::UploadQueue() {
 }
 
 void ChunkStreaming::ProcessUploads(ChunkRegistry& registry) {
+    core::ScopedTimer uploadTimer(profiler_, core::Metric::Upload);
     while (stats_.uploadedThisFrame < config_.maxGpuUploadsPerFrame) {
         MeshReady ready;
         if (!uploadQueue_.try_pop(ready)) {
