@@ -39,7 +39,9 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - **, / .**: Decrease/increase load radius (chunks)
 - **F1**: Toggle frustum culling
 - **F2**: Toggle distance culling
-- **F3**: Toggle streaming (pause/resume)
+- **F3**: Toggle performance stats in window title
+- **F4**: Toggle periodic perf logging to stdout
+- **F5**: Toggle streaming (pause/resume)
 
 ## Notes
 - The executable prints GPU vendor/renderer/version on startup.
@@ -87,3 +89,11 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - Gravity: **-20.0 m/s²**
 - Jump impulse: **+8.0 m/s**
 - Move speed: **4.5 m/s** on XZ plane (camera yaw only).
+
+## Profiling + 80/20 Optimizations (PR-09)
+- Timings are collected with `std::chrono::steady_clock` on both the main thread and workers.
+- Window title (when enabled) shows:
+  - **frame / upd / up / rnd**: EMA of frame, update, GPU upload, and render times (ms).
+  - **gen / mesh**: average ms per completed worker job with job counts per window.
+  - **loaded / gpu / queues / drawn**: streaming and render counts for quick context.
+- The optional stdout report prints a one-line summary every ~5s when enabled.

@@ -17,6 +17,7 @@
 
 #include "Camera.h"
 #include "Shader.h"
+#include "core/Profiler.h"
 #include "core/WorkerPool.h"
 #include "game/Player.h"
 #include "math/Frustum.h"
@@ -251,16 +252,19 @@ int main() {
     streamingConfig.workerThreads = 2;
 
     voxel::ChunkStreaming streaming(streamingConfig);
+    core::Profiler profiler;
     core::WorkerPool workerPool;
     workerPool.Start(static_cast<std::size_t>(streamingConfig.workerThreads),
                      streaming.GenerateQueue(),
                      streaming.MeshQueue(),
                      streaming.UploadQueue(),
                      chunkRegistry,
-                     mesher);
+                     mesher,
+                     &profiler);
     streaming.SetWorkerThreads(workerPool.ThreadCount());
+    streaming.SetProfiler(&profiler);
 
-    auto lastTime = std::chrono::high_resolution_clock::now();
+    auto lastTime = std::chrono::steady_clock::now();
     auto fpsTimer = lastTime;
     int frames = 0;
     bool escPressed = false;
@@ -271,10 +275,15 @@ int main() {
     bool decreaseLoadRadiusPressed = false;
     bool increaseLoadRadiusPressed = false;
     bool streamingTogglePressed = false;
+    bool statsTogglePressed = false;
+    bool statsPrintTogglePressed = false;
     bool frustumTogglePressed = false;
     bool distanceTogglePressed = false;
     bool frustumCullingEnabled = true;
     bool distanceCullingEnabled = true;
+    bool statsTitleEnabled = true;
+    bool statsPrintEnabled = false;
+    auto lastStatsPrint = lastTime - std::chrono::seconds(5);
     std::size_t lastLoadedChunks = 0;
     std::size_t lastDrawnChunks = 0;
     std::size_t lastFrustumCulled = 0;
@@ -298,9 +307,16 @@ int main() {
 #endif
     auto lastClampLogTime = lastTime - std::chrono::seconds(1);
     game::Player player(kPlayerSpawn);
+    glm::mat4 projection(1.0f);
+    glm::mat4 view(1.0f);
+    Frustum frustum = Frustum::FromMatrix(glm::mat4(1.0f));
+    glm::vec3 lightDir(0.0f, -1.0f, 0.0f);
+    glm::vec3 playerPosition = player.Position();
+    voxel::ChunkCoord playerChunk{0, 0, 0};
 
     while (!glfwWindowShouldClose(window)) {
-        auto now = std::chrono::high_resolution_clock::now();
+        core::ScopedTimer frameTimer(&profiler, core::Metric::Frame);
+        auto now = std::chrono::steady_clock::now();
         std::chrono::duration<float> delta = now - lastTime;
         float deltaTime = delta.count();
         if (deltaTime > kMaxDeltaTime) {
@@ -314,239 +330,264 @@ int main() {
         lastTime = now;
         glm::vec3 desiredDir(0.0f);
 
-        int escState = glfwGetKey(window, GLFW_KEY_ESCAPE);
-        if (escState == GLFW_PRESS && !escPressed) {
-            escPressed = true;
+        {
+            core::ScopedTimer updateTimer(&profiler, core::Metric::Update);
+
+            int escState = glfwGetKey(window, GLFW_KEY_ESCAPE);
+            if (escState == GLFW_PRESS && !escPressed) {
+                escPressed = true;
+                if (gMouseCaptured) {
+                    setMouseCapture(window, false);
+                }
+            } else if (escState == GLFW_RELEASE) {
+                escPressed = false;
+            }
+
+            int decreaseState = glfwGetKey(window, GLFW_KEY_LEFT_BRACKET);
+            if (decreaseState == GLFW_PRESS && !decreaseRadiusPressed) {
+                decreaseRadiusPressed = true;
+                int newRadius = std::clamp(streaming.RenderRadius() - 1, kRenderRadiusMin, kRenderRadiusMax);
+                streaming.SetRenderRadius(newRadius);
+                std::cout << "[Culling] Render radius set to " << streaming.RenderRadius() << " chunks.\n";
+            } else if (decreaseState == GLFW_RELEASE) {
+                decreaseRadiusPressed = false;
+            }
+
+            int increaseState = glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET);
+            if (increaseState == GLFW_PRESS && !increaseRadiusPressed) {
+                increaseRadiusPressed = true;
+                int newRadius = std::clamp(streaming.RenderRadius() + 1, kRenderRadiusMin, kRenderRadiusMax);
+                streaming.SetRenderRadius(newRadius);
+                std::cout << "[Culling] Render radius set to " << streaming.RenderRadius() << " chunks.\n";
+            } else if (increaseState == GLFW_RELEASE) {
+                increaseRadiusPressed = false;
+            }
+
+            int decreaseLoadState = glfwGetKey(window, GLFW_KEY_COMMA);
+            if (decreaseLoadState == GLFW_PRESS && !decreaseLoadRadiusPressed) {
+                decreaseLoadRadiusPressed = true;
+                int newRadius = std::clamp(streaming.LoadRadius() - 1, kLoadRadiusMin, kLoadRadiusMax);
+                streaming.SetLoadRadius(newRadius);
+                std::cout << "[Streaming] Load radius set to " << streaming.LoadRadius() << " chunks.\n";
+            } else if (decreaseLoadState == GLFW_RELEASE) {
+                decreaseLoadRadiusPressed = false;
+            }
+
+            int increaseLoadState = glfwGetKey(window, GLFW_KEY_PERIOD);
+            if (increaseLoadState == GLFW_PRESS && !increaseLoadRadiusPressed) {
+                increaseLoadRadiusPressed = true;
+                int newRadius = std::clamp(streaming.LoadRadius() + 1, kLoadRadiusMin, kLoadRadiusMax);
+                streaming.SetLoadRadius(newRadius);
+                std::cout << "[Streaming] Load radius set to " << streaming.LoadRadius() << " chunks.\n";
+            } else if (increaseLoadState == GLFW_RELEASE) {
+                increaseLoadRadiusPressed = false;
+            }
+
+            int statsToggleState = glfwGetKey(window, GLFW_KEY_F3);
+            if (statsToggleState == GLFW_PRESS && !statsTogglePressed) {
+                statsTogglePressed = true;
+                statsTitleEnabled = !statsTitleEnabled;
+                std::cout << "[Stats] Title " << (statsTitleEnabled ? "enabled" : "disabled") << ".\n";
+            } else if (statsToggleState == GLFW_RELEASE) {
+                statsTogglePressed = false;
+            }
+
+            int statsPrintState = glfwGetKey(window, GLFW_KEY_F4);
+            if (statsPrintState == GLFW_PRESS && !statsPrintTogglePressed) {
+                statsPrintTogglePressed = true;
+                statsPrintEnabled = !statsPrintEnabled;
+                std::cout << "[Stats] Stdout " << (statsPrintEnabled ? "enabled" : "disabled") << ".\n";
+            } else if (statsPrintState == GLFW_RELEASE) {
+                statsPrintTogglePressed = false;
+            }
+
+            int streamingToggleState = glfwGetKey(window, GLFW_KEY_F5);
+            if (streamingToggleState == GLFW_PRESS && !streamingTogglePressed) {
+                streamingTogglePressed = true;
+                streaming.SetEnabled(!streaming.Enabled());
+                std::cout << "[Streaming] " << (streaming.Enabled() ? "Enabled" : "Paused") << ".\n";
+            } else if (streamingToggleState == GLFW_RELEASE) {
+                streamingTogglePressed = false;
+            }
+
+            int frustumToggleState = glfwGetKey(window, GLFW_KEY_F1);
+            if (frustumToggleState == GLFW_PRESS && !frustumTogglePressed) {
+                frustumTogglePressed = true;
+                frustumCullingEnabled = !frustumCullingEnabled;
+                std::cout << "[Culling] Frustum culling " << (frustumCullingEnabled ? "enabled" : "disabled") << ".\n";
+            } else if (frustumToggleState == GLFW_RELEASE) {
+                frustumTogglePressed = false;
+            }
+
+            int distanceToggleState = glfwGetKey(window, GLFW_KEY_F2);
+            if (distanceToggleState == GLFW_PRESS && !distanceTogglePressed) {
+                distanceTogglePressed = true;
+                distanceCullingEnabled = !distanceCullingEnabled;
+                std::cout << "[Culling] Distance culling " << (distanceCullingEnabled ? "enabled" : "disabled") << ".\n";
+            } else if (distanceToggleState == GLFW_RELEASE) {
+                distanceTogglePressed = false;
+            }
+
             if (gMouseCaptured) {
-                setMouseCapture(window, false);
-            }
-        } else if (escState == GLFW_RELEASE) {
-            escPressed = false;
-        }
+                float yawRadians = glm::radians(gCamera.getYaw());
+                glm::vec3 forward(std::cos(yawRadians), 0.0f, std::sin(yawRadians));
+                glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
 
-        int decreaseState = glfwGetKey(window, GLFW_KEY_LEFT_BRACKET);
-        if (decreaseState == GLFW_PRESS && !decreaseRadiusPressed) {
-            decreaseRadiusPressed = true;
-            int newRadius = std::clamp(streaming.RenderRadius() - 1, kRenderRadiusMin, kRenderRadiusMax);
-            streaming.SetRenderRadius(newRadius);
-            std::cout << "[Culling] Render radius set to " << streaming.RenderRadius() << " chunks.\n";
-        } else if (decreaseState == GLFW_RELEASE) {
-            decreaseRadiusPressed = false;
-        }
-
-        int increaseState = glfwGetKey(window, GLFW_KEY_RIGHT_BRACKET);
-        if (increaseState == GLFW_PRESS && !increaseRadiusPressed) {
-            increaseRadiusPressed = true;
-            int newRadius = std::clamp(streaming.RenderRadius() + 1, kRenderRadiusMin, kRenderRadiusMax);
-            streaming.SetRenderRadius(newRadius);
-            std::cout << "[Culling] Render radius set to " << streaming.RenderRadius() << " chunks.\n";
-        } else if (increaseState == GLFW_RELEASE) {
-            increaseRadiusPressed = false;
-        }
-
-        int decreaseLoadState = glfwGetKey(window, GLFW_KEY_COMMA);
-        if (decreaseLoadState == GLFW_PRESS && !decreaseLoadRadiusPressed) {
-            decreaseLoadRadiusPressed = true;
-            int newRadius = std::clamp(streaming.LoadRadius() - 1, kLoadRadiusMin, kLoadRadiusMax);
-            streaming.SetLoadRadius(newRadius);
-            std::cout << "[Streaming] Load radius set to " << streaming.LoadRadius() << " chunks.\n";
-        } else if (decreaseLoadState == GLFW_RELEASE) {
-            decreaseLoadRadiusPressed = false;
-        }
-
-        int increaseLoadState = glfwGetKey(window, GLFW_KEY_PERIOD);
-        if (increaseLoadState == GLFW_PRESS && !increaseLoadRadiusPressed) {
-            increaseLoadRadiusPressed = true;
-            int newRadius = std::clamp(streaming.LoadRadius() + 1, kLoadRadiusMin, kLoadRadiusMax);
-            streaming.SetLoadRadius(newRadius);
-            std::cout << "[Streaming] Load radius set to " << streaming.LoadRadius() << " chunks.\n";
-        } else if (increaseLoadState == GLFW_RELEASE) {
-            increaseLoadRadiusPressed = false;
-        }
-
-        int streamingToggleState = glfwGetKey(window, GLFW_KEY_F3);
-        if (streamingToggleState == GLFW_PRESS && !streamingTogglePressed) {
-            streamingTogglePressed = true;
-            streaming.SetEnabled(!streaming.Enabled());
-            std::cout << "[Streaming] " << (streaming.Enabled() ? "Enabled" : "Paused") << ".\n";
-        } else if (streamingToggleState == GLFW_RELEASE) {
-            streamingTogglePressed = false;
-        }
-
-        int frustumToggleState = glfwGetKey(window, GLFW_KEY_F1);
-        if (frustumToggleState == GLFW_PRESS && !frustumTogglePressed) {
-            frustumTogglePressed = true;
-            frustumCullingEnabled = !frustumCullingEnabled;
-            std::cout << "[Culling] Frustum culling " << (frustumCullingEnabled ? "enabled" : "disabled") << ".\n";
-        } else if (frustumToggleState == GLFW_RELEASE) {
-            frustumTogglePressed = false;
-        }
-
-        int distanceToggleState = glfwGetKey(window, GLFW_KEY_F2);
-        if (distanceToggleState == GLFW_PRESS && !distanceTogglePressed) {
-            distanceTogglePressed = true;
-            distanceCullingEnabled = !distanceCullingEnabled;
-            std::cout << "[Culling] Distance culling " << (distanceCullingEnabled ? "enabled" : "disabled") << ".\n";
-        } else if (distanceToggleState == GLFW_RELEASE) {
-            distanceTogglePressed = false;
-        }
-
-        if (gMouseCaptured) {
-            float yawRadians = glm::radians(gCamera.getYaw());
-            glm::vec3 forward(std::cos(yawRadians), 0.0f, std::sin(yawRadians));
-            glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
-
-            if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-                desiredDir += forward;
-            }
-            if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-                desiredDir -= forward;
-            }
-            if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-                desiredDir -= right;
-            }
-            if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-                desiredDir += right;
-            }
-        }
-
-        if (glm::length(desiredDir) > 0.0f) {
-            desiredDir = glm::normalize(desiredDir);
-        }
-
-        bool jumpPressed = false;
-        int spaceState = glfwGetKey(window, GLFW_KEY_SPACE);
-        if (spaceState == GLFW_PRESS && !spacePressed) {
-            spacePressed = true;
-            if (gMouseCaptured) {
-                jumpPressed = true;
-            }
-        } else if (spaceState == GLFW_RELEASE) {
-            spacePressed = false;
-        }
-
-#ifndef NDEBUG
-        int resetState = glfwGetKey(window, GLFW_KEY_R);
-        if (resetState == GLFW_PRESS && !resetPressed) {
-            resetPressed = true;
-            player.SetPosition(kPlayerSpawn);
-            player.ResetVelocity();
-            std::cout << "[Debug] Player reset to spawn.\n";
-        } else if (resetState == GLFW_RELEASE) {
-            resetPressed = false;
-        }
-#endif
-
-        player.Update(chunkRegistry, desiredDir, jumpPressed, deltaTime);
-        gCamera.setPosition(player.Position() + kEyeOffset);
-
-        glClearColor(0.08f, 0.10f, 0.15f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        int width = 0;
-        int height = 0;
-        glfwGetFramebufferSize(window, &width, &height);
-        float aspect = width > 0 && height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
-
-        glm::mat4 projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 500.0f);
-        glm::mat4 view = gCamera.getViewMatrix();
-        const Frustum frustum = Frustum::FromMatrix(projection * view);
-        glm::vec3 lightDir = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
-
-        currentHit = {};
-        hasTarget = false;
-        debugDraw.Clear();
-        if (gMouseCaptured) {
-            currentHit = voxel::RaycastBlocks(chunkRegistry, gCamera.getPosition(), gCamera.getFront(), kReachDistance);
-            if (currentHit.hit) {
-                hasTarget = true;
-                const glm::vec3 min = glm::vec3(currentHit.block) - glm::vec3(kHighlightEpsilon);
-                const glm::vec3 max = glm::vec3(currentHit.block) + glm::vec3(1.0f + kHighlightEpsilon);
-                debugDraw.UpdateCube(min, max);
-            }
-        }
-
-        int leftState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
-        if (leftState == GLFW_PRESS && !leftClickPressed) {
-            leftClickPressed = true;
-            if (!gMouseCaptured) {
-                setMouseCapture(window, true);
-            } else if (hasTarget) {
-                voxel::WorldBlockCoord target{currentHit.block.x, currentHit.block.y, currentHit.block.z};
-                voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockAir);
-            }
-        } else if (leftState == GLFW_RELEASE) {
-            leftClickPressed = false;
-        }
-
-        int rightState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
-        if (rightState == GLFW_PRESS && !rightClickPressed) {
-            rightClickPressed = true;
-            if (gMouseCaptured && hasTarget && currentHit.normal != glm::ivec3(0)) {
-                glm::ivec3 placeBlock = currentHit.block + currentHit.normal;
-                voxel::WorldBlockCoord target{placeBlock.x, placeBlock.y, placeBlock.z};
-                if (chunkRegistry.GetBlockOrAir(target) == voxel::kBlockAir) {
-                    voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockDirt);
+                if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+                    desiredDir += forward;
+                }
+                if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+                    desiredDir -= forward;
+                }
+                if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+                    desiredDir -= right;
+                }
+                if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+                    desiredDir += right;
                 }
             }
-        } else if (rightState == GLFW_RELEASE) {
-            rightClickPressed = false;
+
+            if (glm::length(desiredDir) > 0.0f) {
+                desiredDir = glm::normalize(desiredDir);
+            }
+
+            bool jumpPressed = false;
+            int spaceState = glfwGetKey(window, GLFW_KEY_SPACE);
+            if (spaceState == GLFW_PRESS && !spacePressed) {
+                spacePressed = true;
+                if (gMouseCaptured) {
+                    jumpPressed = true;
+                }
+            } else if (spaceState == GLFW_RELEASE) {
+                spacePressed = false;
+            }
+
+#ifndef NDEBUG
+            int resetState = glfwGetKey(window, GLFW_KEY_R);
+            if (resetState == GLFW_PRESS && !resetPressed) {
+                resetPressed = true;
+                player.SetPosition(kPlayerSpawn);
+                player.ResetVelocity();
+                std::cout << "[Debug] Player reset to spawn.\n";
+            } else if (resetState == GLFW_RELEASE) {
+                resetPressed = false;
+            }
+#endif
+
+            player.Update(chunkRegistry, desiredDir, jumpPressed, deltaTime);
+            gCamera.setPosition(player.Position() + kEyeOffset);
+
+            glClearColor(0.08f, 0.10f, 0.15f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+            int width = 0;
+            int height = 0;
+            glfwGetFramebufferSize(window, &width, &height);
+            float aspect = width > 0 && height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
+
+            projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 500.0f);
+            view = gCamera.getViewMatrix();
+            frustum = Frustum::FromMatrix(projection * view);
+            lightDir = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
+
+            currentHit = {};
+            hasTarget = false;
+            debugDraw.Clear();
+            if (gMouseCaptured) {
+                currentHit = voxel::RaycastBlocks(chunkRegistry, gCamera.getPosition(), gCamera.getFront(), kReachDistance);
+                if (currentHit.hit) {
+                    hasTarget = true;
+                    const glm::vec3 min = glm::vec3(currentHit.block) - glm::vec3(kHighlightEpsilon);
+                    const glm::vec3 max = glm::vec3(currentHit.block) + glm::vec3(1.0f + kHighlightEpsilon);
+                    debugDraw.UpdateCube(min, max);
+                }
+            }
+
+            int leftState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
+            if (leftState == GLFW_PRESS && !leftClickPressed) {
+                leftClickPressed = true;
+                if (!gMouseCaptured) {
+                    setMouseCapture(window, true);
+                } else if (hasTarget) {
+                    voxel::WorldBlockCoord target{currentHit.block.x, currentHit.block.y, currentHit.block.z};
+                    voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockAir);
+                }
+            } else if (leftState == GLFW_RELEASE) {
+                leftClickPressed = false;
+            }
+
+            int rightState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
+            if (rightState == GLFW_PRESS && !rightClickPressed) {
+                rightClickPressed = true;
+                if (gMouseCaptured && hasTarget && currentHit.normal != glm::ivec3(0)) {
+                    glm::ivec3 placeBlock = currentHit.block + currentHit.normal;
+                    voxel::WorldBlockCoord target{placeBlock.x, placeBlock.y, placeBlock.z};
+                    if (chunkRegistry.GetBlockOrAir(target) == voxel::kBlockAir) {
+                        voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockDirt);
+                    }
+                }
+            } else if (rightState == GLFW_RELEASE) {
+                rightClickPressed = false;
+            }
+
+            shader.use();
+            shader.setMat4("uProjection", projection);
+            shader.setMat4("uView", view);
+            shader.setVec3("uLightDir", lightDir);
+
+            playerPosition = player.Position();
+            voxel::WorldBlockCoord playerBlock{
+                static_cast<int>(std::floor(playerPosition.x)),
+                static_cast<int>(std::floor(playerPosition.y)),
+                static_cast<int>(std::floor(playerPosition.z))};
+            playerChunk = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
+            streaming.Tick(playerChunk, chunkRegistry, mesher);
         }
-
-        shader.use();
-        shader.setMat4("uProjection", projection);
-        shader.setMat4("uView", view);
-        shader.setVec3("uLightDir", lightDir);
-
-        const glm::vec3 cameraPosition = gCamera.getPosition();
-        const glm::vec3 playerPosition = player.Position();
-        voxel::WorldBlockCoord playerBlock{
-            static_cast<int>(std::floor(playerPosition.x)),
-            static_cast<int>(std::floor(playerPosition.y)),
-            static_cast<int>(std::floor(playerPosition.z))};
-        const voxel::ChunkCoord playerChunk = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
-        streaming.Tick(playerChunk, chunkRegistry, mesher);
 
         std::size_t distanceCulled = 0;
         std::size_t frustumCulled = 0;
         std::size_t drawn = 0;
 
-        const int renderRadiusChunks = streaming.RenderRadius();
-        chunkRegistry.ForEachEntry([&](const voxel::ChunkCoord& coord,
-                                       const std::shared_ptr<voxel::ChunkEntry>& entry) {
-            if (entry->gpuState.load(std::memory_order_acquire) != voxel::GpuState::Uploaded) {
-                return;
-            }
+        {
+            core::ScopedTimer renderTimer(&profiler, core::Metric::Render);
+            const int renderRadiusChunks = streaming.RenderRadius();
 
-            if (distanceCullingEnabled) {
-                const int dx = std::abs(coord.x - playerChunk.x);
-                const int dz = std::abs(coord.z - playerChunk.z);
-                if (std::max(dx, dz) > renderRadiusChunks) {
-                    ++distanceCulled;
+            chunkRegistry.ForEachEntry([&](const voxel::ChunkCoord& coord,
+                                           const std::shared_ptr<voxel::ChunkEntry>& entry) {
+                if (entry->gpuState.load(std::memory_order_acquire) != voxel::GpuState::Uploaded) {
                     return;
                 }
-            }
 
-            if (frustumCullingEnabled) {
-                const voxel::ChunkBounds bounds = voxel::GetChunkBounds(coord);
-                if (!frustum.IntersectsAabb(bounds.min, bounds.max)) {
-                    ++frustumCulled;
-                    return;
+                if (distanceCullingEnabled) {
+                    const int dx = std::abs(coord.x - playerChunk.x);
+                    const int dz = std::abs(coord.z - playerChunk.z);
+                    if (std::max(dx, dz) > renderRadiusChunks) {
+                        ++distanceCulled;
+                        return;
+                    }
                 }
+
+                if (frustumCullingEnabled) {
+                    const voxel::ChunkBounds bounds = voxel::GetChunkBounds(coord);
+                    if (!frustum.IntersectsAabb(bounds.min, bounds.max)) {
+                        ++frustumCulled;
+                        return;
+                    }
+                }
+
+                entry->mesh.Draw();
+                ++drawn;
+            });
+
+            if (debugDraw.HasGeometry()) {
+                debugShader.use();
+                debugShader.setMat4("uProjection", projection);
+                debugShader.setMat4("uView", view);
+                debugShader.setVec3("uColor", glm::vec3(1.0f, 0.95f, 0.2f));
+                glLineWidth(2.0f);
+                debugDraw.Draw();
+                glLineWidth(1.0f);
             }
-
-            entry->mesh.Draw();
-            ++drawn;
-        });
-
-        if (debugDraw.HasGeometry()) {
-            debugShader.use();
-            debugShader.setMat4("uProjection", projection);
-            debugShader.setMat4("uView", view);
-            debugShader.setVec3("uColor", glm::vec3(1.0f, 0.95f, 0.2f));
-            glLineWidth(2.0f);
-            debugDraw.Draw();
-            glLineWidth(1.0f);
         }
 
         const voxel::ChunkStreamingStats& streamStats = streaming.Stats();
@@ -575,30 +616,63 @@ int main() {
             float fps = static_cast<float>(frames) / fpsElapsed.count();
             auto round1 = [](float value) { return std::round(value * 10.0f) / 10.0f; };
             std::ostringstream title;
+            core::ProfilerSnapshot snapshot = profiler.CollectSnapshot();
+            const auto metricIndex = [](core::Metric metric) {
+                return static_cast<std::size_t>(metric);
+            };
+            auto ms = [&](core::Metric metric) {
+                return snapshot.emaMs[metricIndex(metric)];
+            };
+
             title << "Mineclone"
-                  << " | FPS: " << std::fixed << std::setprecision(1) << fps
-                  << " | Grounded: " << (player.Grounded() ? 1 : 0)
-                  << " | Pos: (" << round1(playerPosition.x) << "," << round1(playerPosition.y) << ","
-                  << round1(playerPosition.z) << ")"
-                  << " | Vy: " << std::setprecision(2) << player.Velocity().y
-                  << " | PlayerChunk: (" << streamStats.playerChunk.x << "," << streamStats.playerChunk.z << ")"
-                  << " | Loaded: " << lastLoadedChunks
-                  << " | Generated: " << lastGeneratedChunks
-                  << " | MeshedCPU: " << lastMeshedChunks
-                  << " | GPU Ready: " << lastGpuReadyChunks
-                  << " | Drawn: " << lastDrawnChunks
-                  << " | FrustumCulled: " << lastFrustumCulled
-                  << " | DistCulled: " << lastDistanceCulled
-                  << " | DrawCalls: " << lastDrawCalls
-                  << " | LoadQ: " << lastCreateQueue << "/" << lastMeshQueue << "/" << lastUploadQueue
-                  << " | Budgets: " << lastCreates << "/" << lastMeshes << "/" << lastUploads
-                  << " | Workers: " << lastWorkerThreads
-                  << " | Radii L/R: " << streaming.LoadRadius() << "/" << streaming.RenderRadius();
-            if (hasTarget) {
-                title << " | Target: (" << currentHit.block.x << "," << currentHit.block.y << ","
-                      << currentHit.block.z << ")";
+                  << " | FPS: " << std::fixed << std::setprecision(1) << fps;
+
+            if (statsTitleEnabled) {
+                title << " | frame " << ms(core::Metric::Frame)
+                      << "ms | upd " << ms(core::Metric::Update)
+                      << "ms | up " << ms(core::Metric::Upload)
+                      << "ms | rnd " << ms(core::Metric::Render) << "ms";
+
+                const double genMs = snapshot.avgMs[metricIndex(core::Metric::Generate)];
+                const double meshMs = snapshot.avgMs[metricIndex(core::Metric::Mesh)];
+                const std::int64_t genCount = snapshot.counts[metricIndex(core::Metric::Generate)];
+                const std::int64_t meshCount = snapshot.counts[metricIndex(core::Metric::Mesh)];
+
+                title << " | gen " << std::setprecision(2) << genMs << "ms/job (" << genCount << ")"
+                      << " | mesh " << meshMs << "ms/job (" << meshCount << ")"
+                      << " | Loaded: " << lastLoadedChunks
+                      << " | GPU: " << lastGpuReadyChunks
+                      << " | Q: " << lastCreateQueue << "/" << lastMeshQueue << "/" << lastUploadQueue
+                      << " | Drawn: " << lastDrawnChunks;
+            }
+
+            if (!statsTitleEnabled) {
+                title << " | Pos: (" << round1(player.Position().x) << "," << round1(player.Position().y) << ","
+                      << round1(player.Position().z) << ")";
             }
             glfwSetWindowTitle(window, title.str().c_str());
+
+            if (statsPrintEnabled) {
+                std::chrono::duration<double> printElapsed = now - lastStatsPrint;
+                if (printElapsed.count() >= 5.0) {
+                    std::ostringstream perfLine;
+                    perfLine << "[Perf] fps " << std::fixed << std::setprecision(1) << fps
+                             << " frame " << ms(core::Metric::Frame) << "ms"
+                             << " upd " << ms(core::Metric::Update) << "ms"
+                             << " up " << ms(core::Metric::Upload) << "ms"
+                             << " rnd " << ms(core::Metric::Render) << "ms"
+                             << " gen " << std::setprecision(2) << snapshot.avgMs[metricIndex(core::Metric::Generate)]
+                             << "ms/job (" << snapshot.counts[metricIndex(core::Metric::Generate)] << ")"
+                             << " mesh " << snapshot.avgMs[metricIndex(core::Metric::Mesh)]
+                             << "ms/job (" << snapshot.counts[metricIndex(core::Metric::Mesh)] << ")"
+                             << " loaded " << lastLoadedChunks
+                             << " gpu " << lastGpuReadyChunks
+                             << " q " << lastCreateQueue << "/" << lastMeshQueue << "/" << lastUploadQueue;
+                    std::cout << perfLine.str() << '\n';
+                    lastStatsPrint = now;
+                }
+            }
+
             fpsTimer = now;
             frames = 0;
         }

@@ -7,6 +7,7 @@
 #include <thread>
 #include <vector>
 
+#include "core/Profiler.h"
 #include "core/ThreadSafeQueue.h"
 #include "voxel/ChunkJobs.h"
 
@@ -28,7 +29,8 @@ public:
                ThreadSafeQueue<voxel::MeshJob>& meshQueue,
                ThreadSafeQueue<voxel::MeshReady>& readyQueue,
                voxel::ChunkRegistry& registry,
-               const voxel::ChunkMesher& mesher);
+               const voxel::ChunkMesher& mesher,
+               core::Profiler* profiler);
     void Stop();
     void NotifyWork();
 
@@ -47,6 +49,7 @@ private:
     ThreadSafeQueue<voxel::MeshReady>* readyQueue_ = nullptr;
     voxel::ChunkRegistry* registry_ = nullptr;
     const voxel::ChunkMesher* mesher_ = nullptr;
+    core::Profiler* profiler_ = nullptr;
 
     std::mutex wakeMutex_;
     std::condition_variable wakeCv_;
