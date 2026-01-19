@@ -1,4 +1,3 @@
-#define GLFW_INCLUDE_NONE
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 
@@ -618,9 +617,8 @@ int main(int argc, char** argv) {
                 debugShader.setMat4("uProjection", projection);
                 debugShader.setMat4("uView", view);
                 debugShader.setVec3("uColor", glm::vec3(1.0f, 0.95f, 0.2f));
-                glLineWidth(2.0f);
+                // glLineWidth not available in current GLAD; default line width used.
                 debugDraw.Draw();
-                glLineWidth(1.0f);
             }
         }
 
