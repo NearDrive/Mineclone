@@ -62,47 +62,46 @@ std::shared_ptr<const ChunkEntry> ChunkRegistry::TryGetEntry(const ChunkCoord& c
     return it->second;
 }
 
-Chunk* ChunkRegistry::TryGetChunk(const ChunkCoord& coord) {
-    auto entry = TryGetEntry(coord);
-    if (!entry || entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
-        return nullptr;
-    }
-    std::lock_guard<std::mutex> lock(entry->dataMutex);
-    return entry->chunk.get();
-}
-
-const Chunk* ChunkRegistry::TryGetChunk(const ChunkCoord& coord) const {
-    auto entry = TryGetEntry(coord);
-    if (!entry || entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
-        return nullptr;
-    }
-    std::lock_guard<std::mutex> lock(entry->dataMutex);
-    return entry->chunk.get();
-}
-
 bool ChunkRegistry::HasChunk(const ChunkCoord& coord) const {
     auto entry = TryGetEntry(coord);
     return entry && entry->generationState.load(std::memory_order_acquire) == GenerationState::Ready;
 }
 
+ChunkReadHandle ChunkRegistry::AcquireChunkRead(const ChunkCoord& coord) const {
+    ChunkReadHandle handle;
+    auto entry = TryGetEntry(coord);
+    if (!entry || entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
+        return handle;
+    }
+
+    handle.entry = entry;
+    handle.lock = std::shared_lock<std::shared_mutex>(entry->dataMutex);
+    handle.chunk = entry->chunk.get();
+    if (!handle.chunk) {
+        handle.lock.unlock();
+        handle.entry.reset();
+    }
+    return handle;
+}
+
 BlockId ChunkRegistry::GetBlock(const WorldBlockCoord& world) const {
     ChunkCoord chunkCoord = WorldToChunkCoord(world, kChunkSize);
     LocalCoord local = WorldToLocalCoord(world, kChunkSize);
-    const Chunk* chunk = TryGetChunk(chunkCoord);
-    if (!chunk) {
+    ChunkReadHandle handle = AcquireChunkRead(chunkCoord);
+    if (!handle) {
         return SampleFlatWorld(world);
     }
-    return chunk->Get(local.x, local.y, local.z);
+    return handle.chunk->Get(local.x, local.y, local.z);
 }
 
 BlockId ChunkRegistry::GetBlockOrAir(const WorldBlockCoord& world) const {
     ChunkCoord chunkCoord = WorldToChunkCoord(world, kChunkSize);
     LocalCoord local = WorldToLocalCoord(world, kChunkSize);
-    const Chunk* chunk = TryGetChunk(chunkCoord);
-    if (!chunk) {
+    ChunkReadHandle handle = AcquireChunkRead(chunkCoord);
+    if (!handle) {
         return kBlockAir;
     }
-    return chunk->Get(local.x, local.y, local.z);
+    return handle.chunk->Get(local.x, local.y, local.z);
 }
 
 void ChunkRegistry::SetBlock(const WorldBlockCoord& world, BlockId id) {
@@ -110,14 +109,14 @@ void ChunkRegistry::SetBlock(const WorldBlockCoord& world, BlockId id) {
     LocalCoord local = WorldToLocalCoord(world, kChunkSize);
     auto entry = GetOrCreateEntry(chunkCoord);
     if (entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
-        std::lock_guard<std::mutex> lock(entry->dataMutex);
+        std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
         if (!entry->chunk) {
             entry->chunk = std::make_unique<Chunk>();
             GenerateChunkData(chunkCoord, *entry->chunk);
         }
         entry->generationState.store(GenerationState::Ready, std::memory_order_release);
     }
-    std::lock_guard<std::mutex> lock(entry->dataMutex);
+    std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
     entry->chunk->Set(local.x, local.y, local.z, id);
 }
 

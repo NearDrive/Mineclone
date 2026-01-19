@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -45,7 +46,15 @@ struct ChunkEntry {
     std::atomic<MeshingState> meshingState{MeshingState::NotScheduled};
     std::atomic<GpuState> gpuState{GpuState::NotUploaded};
     std::atomic<bool> wanted{true};
-    mutable std::mutex dataMutex;
+    mutable std::shared_mutex dataMutex;
+};
+
+struct ChunkReadHandle {
+    std::shared_ptr<const ChunkEntry> entry;
+    std::shared_lock<std::shared_mutex> lock;
+    const Chunk* chunk = nullptr;
+
+    explicit operator bool() const { return chunk != nullptr; }
 };
 
 class ChunkRegistry {
@@ -57,10 +66,9 @@ public:
     std::shared_ptr<ChunkEntry> TryGetEntry(const ChunkCoord& coord);
     std::shared_ptr<const ChunkEntry> TryGetEntry(const ChunkCoord& coord) const;
 
-    Chunk* TryGetChunk(const ChunkCoord& coord);
-    const Chunk* TryGetChunk(const ChunkCoord& coord) const;
-
     bool HasChunk(const ChunkCoord& coord) const;
+
+    ChunkReadHandle AcquireChunkRead(const ChunkCoord& coord) const;
 
     BlockId GetBlock(const WorldBlockCoord& world) const;
     BlockId GetBlockOrAir(const WorldBlockCoord& world) const;

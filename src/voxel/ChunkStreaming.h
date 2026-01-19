@@ -60,6 +60,8 @@ public:
     const ChunkStreamingConfig& Config() const;
     const ChunkStreamingStats& Stats() const;
 
+    bool RequestRemesh(const ChunkCoord& coord, ChunkRegistry& registry);
+
 private:
     void ProcessUploads(ChunkRegistry& registry);
     void BuildDesiredSet(const ChunkCoord& playerChunk);

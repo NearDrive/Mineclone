@@ -31,7 +31,8 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - **W/A/S/D**: Move
 - **Mouse**: Look around (FPS camera)
 - **ESC**: Release mouse capture
-- **Left click**: Re-capture mouse
+- **Left click**: Re-capture mouse (when released) / break block (when captured)
+- **Right click**: Place block (adjacent to targeted face)
 - **[ / ]**: Decrease/increase render radius (chunks)
 - **, / .**: Decrease/increase load radius (chunks)
 - **F1**: Toggle frustum culling
@@ -73,3 +74,8 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
   - Mesh CPU buffers (missing or not-yet-generated neighbors are treated as AIR).
 - Main thread uploads meshes to GPU with a per-frame budget.
 - Window title now shows generated/meshed/GPU-ready counts, queue sizes, and worker thread count.
+
+## Interaction (PR-07)
+- Raycast reach distance: **6 blocks** (voxel DDA).
+- Targeted blocks show a highlighted wireframe outline.
+- Editing a block remeshes the impacted chunk and any touched neighbors.

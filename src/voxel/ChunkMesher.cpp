@@ -16,34 +16,34 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const C
     auto& vertices = mesh.vertices;
     auto& indices = mesh.indices;
 
-    const Chunk* neighborPosX = registry.TryGetChunk({coord.x + 1, coord.y, coord.z});
-    const Chunk* neighborNegX = registry.TryGetChunk({coord.x - 1, coord.y, coord.z});
-    const Chunk* neighborPosY = registry.TryGetChunk({coord.x, coord.y + 1, coord.z});
-    const Chunk* neighborNegY = registry.TryGetChunk({coord.x, coord.y - 1, coord.z});
-    const Chunk* neighborPosZ = registry.TryGetChunk({coord.x, coord.y, coord.z + 1});
-    const Chunk* neighborNegZ = registry.TryGetChunk({coord.x, coord.y, coord.z - 1});
+    ChunkReadHandle neighborPosX = registry.AcquireChunkRead({coord.x + 1, coord.y, coord.z});
+    ChunkReadHandle neighborNegX = registry.AcquireChunkRead({coord.x - 1, coord.y, coord.z});
+    ChunkReadHandle neighborPosY = registry.AcquireChunkRead({coord.x, coord.y + 1, coord.z});
+    ChunkReadHandle neighborNegY = registry.AcquireChunkRead({coord.x, coord.y - 1, coord.z});
+    ChunkReadHandle neighborPosZ = registry.AcquireChunkRead({coord.x, coord.y, coord.z + 1});
+    ChunkReadHandle neighborNegZ = registry.AcquireChunkRead({coord.x, coord.y, coord.z - 1});
 
     auto sampleNeighbor = [&](int nx, int ny, int nz) -> BlockId {
         if (nx >= 0 && nx < kChunkSize && ny >= 0 && ny < kChunkSize && nz >= 0 && nz < kChunkSize) {
             return chunk.Get(nx, ny, nz);
         }
         if (nx < 0) {
-            return neighborNegX ? neighborNegX->Get(nx + kChunkSize, ny, nz) : kBlockAir;
+            return neighborNegX ? neighborNegX.chunk->Get(nx + kChunkSize, ny, nz) : kBlockAir;
         }
         if (nx >= kChunkSize) {
-            return neighborPosX ? neighborPosX->Get(nx - kChunkSize, ny, nz) : kBlockAir;
+            return neighborPosX ? neighborPosX.chunk->Get(nx - kChunkSize, ny, nz) : kBlockAir;
         }
         if (ny < 0) {
-            return neighborNegY ? neighborNegY->Get(nx, ny + kChunkSize, nz) : kBlockAir;
+            return neighborNegY ? neighborNegY.chunk->Get(nx, ny + kChunkSize, nz) : kBlockAir;
         }
         if (ny >= kChunkSize) {
-            return neighborPosY ? neighborPosY->Get(nx, ny - kChunkSize, nz) : kBlockAir;
+            return neighborPosY ? neighborPosY.chunk->Get(nx, ny - kChunkSize, nz) : kBlockAir;
         }
         if (nz < 0) {
-            return neighborNegZ ? neighborNegZ->Get(nx, ny, nz + kChunkSize) : kBlockAir;
+            return neighborNegZ ? neighborNegZ.chunk->Get(nx, ny, nz + kChunkSize) : kBlockAir;
         }
         if (nz >= kChunkSize) {
-            return neighborPosZ ? neighborPosZ->Get(nx, ny, nz - kChunkSize) : kBlockAir;
+            return neighborPosZ ? neighborPosZ.chunk->Get(nx, ny, nz - kChunkSize) : kBlockAir;
         }
         return kBlockAir;
     };

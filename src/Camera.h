@@ -23,6 +23,7 @@ public:
     float getYaw() const { return yaw_; }
     float getPitch() const { return pitch_; }
     const glm::vec3& getPosition() const { return position_; }
+    const glm::vec3& getFront() const { return front_; }
 
     void setMovementSpeed(float speed) { movementSpeed_ = speed; }
     void setMouseSensitivity(float sensitivity) { mouseSensitivity_ = sensitivity; }

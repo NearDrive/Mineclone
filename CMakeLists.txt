@@ -50,8 +50,12 @@ add_executable(Mineclone
   src/math/Frustum.h
   src/math/Plane.cpp
   src/math/Plane.h
+  src/renderer/DebugDraw.cpp
+  src/renderer/DebugDraw.h
   src/voxel/BlockId.h
   src/voxel/BlockFaces.h
+  src/voxel/BlockEdit.cpp
+  src/voxel/BlockEdit.h
   src/voxel/Chunk.cpp
   src/voxel/Chunk.h
   src/voxel/ChunkBounds.h
@@ -67,6 +71,8 @@ add_executable(Mineclone
   src/voxel/ChunkRegistry.h
   src/voxel/ChunkStreaming.cpp
   src/voxel/ChunkStreaming.h
+  src/voxel/Raycast.cpp
+  src/voxel/Raycast.h
   src/voxel/VoxelCoords.h
   src/voxel/WorldGen.cpp
   src/voxel/WorldGen.h
