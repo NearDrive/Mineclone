@@ -100,6 +100,8 @@ target_include_directories(Mineclone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+target_compile_definitions(Mineclone PRIVATE GLFW_INCLUDE_NONE)
+
 target_link_libraries(Mineclone PRIVATE glfw glad glm)
 
 if (MSVC)
