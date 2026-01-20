@@ -88,6 +88,13 @@ void CheckRaycast(VerifyState& state) {
     const glm::vec3 dir(0.0f, -1.0f, 0.0f);
     RaycastHit hit = RaycastBlocks(registry, origin, dir, 10.0f);
     Require(hit.hit && hit.block == glm::ivec3(0, 0, 0), "Raycast did not hit expected block.", state);
+
+    const glm::ivec3 edgeBlock(kChunkSize - 1, 0, 0);
+    registry.SetBlock({edgeBlock.x, edgeBlock.y, edgeBlock.z}, kBlockStone);
+    const glm::vec3 edgeOrigin(static_cast<float>(kChunkSize), 0.5f, 0.5f);
+    const glm::vec3 edgeDir(-1.0f, 0.0f, 0.0f);
+    RaycastHit edgeHit = RaycastBlocks(registry, edgeOrigin, edgeDir, 2.0f);
+    Require(edgeHit.hit && edgeHit.block == edgeBlock, "Raycast did not hit expected chunk-edge block.", state);
 }
 
 void CheckEditNeighborRemesh(VerifyState& state) {
