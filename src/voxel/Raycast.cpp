@@ -11,6 +11,14 @@
 namespace voxel {
 
 namespace {
+double FracPart(double value) {
+    return value - std::floor(value);
+}
+
+bool NearlyZero(double value, double eps) {
+    return std::abs(value) <= eps;
+}
+
 double SafeInverse(double value) {
     if (value == 0.0) {
         return std::numeric_limits<double>::infinity();
@@ -35,9 +43,8 @@ RaycastHit RaycastBlocks(const ChunkRegistry& registry, const glm::vec3& origin,
 
     glm::ivec3 block = glm::ivec3(glm::floor(originD));
     for (int axis = 0; axis < 3; ++axis) {
-        const double axisPos = originD[axis];
-        const double axisFrac = axisPos - std::floor(axisPos);
-        if (std::abs(axisFrac) <= kEpsilon && dir[axis] < 0.0) {
+        const double axisFrac = FracPart(originD[axis]);
+        if (NearlyZero(axisFrac, kEpsilon) && dir[axis] < 0.0) {
             block[axis] -= 1;
         }
     }
@@ -50,26 +57,25 @@ RaycastHit RaycastBlocks(const ChunkRegistry& registry, const glm::vec3& origin,
     glm::dvec3 tDelta;
 
     const glm::dvec3 invDir(SafeInverse(dir.x), SafeInverse(dir.y), SafeInverse(dir.z));
+    const double inf = std::numeric_limits<double>::infinity();
 
-    auto nextBoundary = [&](int axis) {
-        const double originAxis = originD[axis];
-        const double blockAxis = static_cast<double>(block[axis]);
-        if (dir[axis] > 0.0) {
-            return (blockAxis + 1.0f - originAxis) * invDir[axis];
+    auto intBound = [&](double s, int stepAxis) {
+        if (stepAxis > 0) {
+            return (std::floor(s) + 1.0 - s);
         }
-        if (dir[axis] < 0.0) {
-            return (originAxis - blockAxis) * -invDir[axis];
+        if (stepAxis < 0) {
+            return (s - std::floor(s));
         }
-        return std::numeric_limits<double>::infinity();
+        return inf;
     };
 
-    tMax.x = nextBoundary(0);
-    tMax.y = nextBoundary(1);
-    tMax.z = nextBoundary(2);
+    tDelta.x = step.x != 0 ? (1.0 / std::abs(dir.x)) : inf;
+    tDelta.y = step.y != 0 ? (1.0 / std::abs(dir.y)) : inf;
+    tDelta.z = step.z != 0 ? (1.0 / std::abs(dir.z)) : inf;
 
-    tDelta.x = std::abs(invDir.x);
-    tDelta.y = std::abs(invDir.y);
-    tDelta.z = std::abs(invDir.z);
+    tMax.x = step.x != 0 ? intBound(originD.x, step.x) * tDelta.x : inf;
+    tMax.y = step.y != 0 ? intBound(originD.y, step.y) * tDelta.y : inf;
+    tMax.z = step.z != 0 ? intBound(originD.z, step.z) * tDelta.z : inf;
 
     double t = 0.0;
     glm::ivec3 hitNormal{0};
@@ -87,27 +93,28 @@ RaycastHit RaycastBlocks(const ChunkRegistry& registry, const glm::vec3& origin,
         return result;
     }
 
-    const int maxSteps = std::min(4096, static_cast<int>(std::ceil(maxDistanceD)) * 3 + 8);
-    for (int stepCount = 0; stepCount < maxSteps && t <= maxDistanceD; ++stepCount) {
+    const int maxSteps = 4096;
+    for (int stepCount = 0; stepCount < maxSteps && t <= maxDistanceD + kEpsilon; ++stepCount) {
         const double minT = std::min({tMax.x, tMax.y, tMax.z});
         const bool advanceX = tMax.x <= minT + kEpsilon;
         const bool advanceY = tMax.y <= minT + kEpsilon;
         const bool advanceZ = tMax.z <= minT + kEpsilon;
+        hitNormal = glm::ivec3(0);
 
         if (advanceX) {
             block.x += step.x;
             tMax.x += tDelta.x;
-            hitNormal = glm::ivec3(-step.x, 0, 0);
+            hitNormal.x = -step.x;
         }
         if (advanceY) {
             block.y += step.y;
             tMax.y += tDelta.y;
-            hitNormal = glm::ivec3(0, -step.y, 0);
+            hitNormal.y = -step.y;
         }
         if (advanceZ) {
             block.z += step.z;
             tMax.z += tDelta.z;
-            hitNormal = glm::ivec3(0, 0, -step.z);
+            hitNormal.z = -step.z;
         }
 
         t = minT;
