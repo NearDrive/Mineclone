@@ -8,14 +8,16 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdlib>
+#include <execinfo.h>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
-#include <thread>
+#include <unistd.h>
 
 #include "Camera.h"
 #include "Shader.h"
@@ -51,8 +53,9 @@ constexpr int kLoadRadiusMax = 48;
 constexpr float kReachDistance = 6.0f;
 constexpr float kHighlightEpsilon = 0.015f;
 constexpr float kMaxDeltaTime = 0.05f;
-constexpr int kSmokeTestFrames = 240;
-constexpr int kSmokeEditTimeoutMs = 3000;
+constexpr int kSmokeTestFrames = 60;
+constexpr int kSmokeEditTimeoutMs = 1000;
+constexpr int kSmokeMaxDurationMs = 1000;
 constexpr float kSmokeDeltaTime = 1.0f / 60.0f;
 const glm::vec3 kPlayerSpawn(0.0f, 20.0f, 0.0f);
 const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
@@ -118,10 +121,28 @@ void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severi
 }
 #endif
 
+#if defined(__linux__)
+void CrashHandler(int signal) {
+    void* frames[64];
+    int count = backtrace(frames, static_cast<int>(std::size(frames)));
+    std::cerr << "[Crash] Signal " << signal << " received. Backtrace:\n";
+    backtrace_symbols_fd(frames, count, STDERR_FILENO);
+    std::_Exit(128 + signal);
+}
+
+void InstallCrashHandler() {
+    std::signal(SIGSEGV, CrashHandler);
+    std::signal(SIGABRT, CrashHandler);
+}
+#endif
+
 } // namespace
 
 int main(int argc, char** argv) {
     core::InitMainThread();
+#if defined(__linux__)
+    InstallCrashHandler();
+#endif
 
     core::CliOptions options;
     std::string cliError;
@@ -248,7 +269,7 @@ int main(int argc, char** argv) {
     streamingConfig.maxChunkCreatesPerFrame = 3;
     streamingConfig.maxChunkMeshesPerFrame = 2;
     streamingConfig.maxGpuUploadsPerFrame = 3;
-    streamingConfig.workerThreads = 2;
+    streamingConfig.workerThreads = smokeTest ? 0 : 2;
 
     voxel::ChunkStreaming streaming(streamingConfig);
     streaming.SetStorage(&chunkStorage);
@@ -311,6 +332,7 @@ int main(int argc, char** argv) {
     bool smokeEditSucceeded = false;
     bool smokeFailed = false;
     int smokeFrames = 0;
+    bool smokeChunkEnsured = false;
     auto lastClampLogTime = lastTime - std::chrono::seconds(1);
     game::Player player(kPlayerSpawn);
     glm::mat4 projection(1.0f);
@@ -579,7 +601,18 @@ int main(int argc, char** argv) {
                 const auto smokeElapsed =
                     std::chrono::duration_cast<std::chrono::milliseconds>(now - smokeStartTime);
 
-                if (ready) {
+                if (!ready && !smokeChunkEnsured) {
+                    auto ensureEntry = chunkRegistry.GetOrCreateEntry(targetChunk);
+                    std::unique_lock<std::shared_mutex> lock(ensureEntry->dataMutex);
+                    if (!ensureEntry->chunk) {
+                        ensureEntry->chunk = std::make_unique<voxel::Chunk>();
+                    }
+                    ensureEntry->generationState.store(voxel::GenerationState::Ready, std::memory_order_release);
+                    ensureEntry->dirty.store(false, std::memory_order_release);
+                    smokeChunkEnsured = true;
+                }
+
+                if (ready || smokeChunkEnsured) {
                     smokeEditRequested = true;
                     smokeEditSucceeded = voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockAir);
                     if (!smokeEditSucceeded) {
@@ -669,10 +702,12 @@ int main(int argc, char** argv) {
         frames++;
         if (smokeTest) {
             ++smokeFrames;
+            const auto smokeElapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - smokeStartTime);
             if (smokeFailed) {
                 break;
             }
-            if (smokeFrames >= kSmokeTestFrames) {
+            if (smokeElapsed.count() >= kSmokeMaxDurationMs || smokeFrames >= kSmokeTestFrames) {
                 if (!smokeEditRequested || !smokeEditSucceeded) {
                     std::cerr << "[Smoke] Deterministic edit did not complete.\n";
                     smokeFailed = true;

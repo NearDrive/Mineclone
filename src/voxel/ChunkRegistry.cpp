@@ -1,5 +1,7 @@
 #include "voxel/ChunkRegistry.h"
 
+#include <atomic>
+#include <chrono>
 #include <iostream>
 #include <shared_mutex>
 #include <utility>
@@ -142,13 +144,19 @@ ChunkReadHandle ChunkRegistry::AcquireChunkRead(const ChunkCoord& coord) const {
     auto entry = TryGetEntry(coord);
     if (!entry || entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
 #ifndef NDEBUG
-        std::cerr << "[ChunkRegistry] AcquireChunkRead failed for chunk (" << coord.x << ", " << coord.y << ", "
-                  << coord.z << "): entry=" << (entry ? "set" : "null");
-        if (entry) {
-            std::cerr << " state=" << static_cast<int>(entry->generationState.load(std::memory_order_acquire))
-                      << " chunk=" << (entry->chunk ? "set" : "null");
+        static std::atomic<std::int64_t> lastLogMs{0};
+        const auto nowMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
+                .count();
+        const auto previous = lastLogMs.load(std::memory_order_relaxed);
+        if (nowMs - previous >= 1000 && lastLogMs.compare_exchange_strong(previous, nowMs)) {
+            std::cerr << "[ChunkRegistry] AcquireChunkRead failed for chunk (" << coord.x << ", " << coord.y << ", "
+                      << coord.z << "): entry=" << (entry ? "set" : "null");
+            if (entry) {
+                std::cerr << " state=" << static_cast<int>(entry->generationState.load(std::memory_order_acquire));
+            }
+            std::cerr << '\n';
         }
-        std::cerr << '\n';
 #endif
         return handle;
     }
