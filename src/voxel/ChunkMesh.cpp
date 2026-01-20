@@ -115,7 +115,7 @@ void ChunkMesh::Draw() const {
 
     MC_ASSERT(gpuIndexCount_ % 3 == 0, "Chunk mesh index count must be a multiple of 3.");
     glad_glBindVertexArray(vao_);
-    glad_glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(gpuIndexCount_), GL_UNSIGNED_INT, nullptr);
+    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(gpuIndexCount_), GL_UNSIGNED_INT, nullptr);
     glad_glBindVertexArray(0);
 }
 
