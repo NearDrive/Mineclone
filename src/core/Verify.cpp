@@ -84,6 +84,8 @@ void CheckRaycast(VerifyState& state) {
     using namespace voxel;
     ChunkRegistry registry;
     registry.SetBlock({0, 0, 0}, kBlockStone);
+    Require(registry.GetBlockOrAir({0, 0, 0}) == kBlockStone,
+            "SetBlock then GetBlockOrAir mismatch in CheckRaycast", state);
     const glm::vec3 origin(0.5f, 2.5f, 0.5f);
     const glm::vec3 dir(0.0f, -1.0f, 0.0f);
     RaycastHit hit = RaycastBlocks(registry, origin, dir, 10.0f);
