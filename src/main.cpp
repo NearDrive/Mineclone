@@ -15,6 +15,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #include "Camera.h"
 #include "Shader.h"
@@ -51,7 +52,7 @@ constexpr float kReachDistance = 6.0f;
 constexpr float kHighlightEpsilon = 0.015f;
 constexpr float kMaxDeltaTime = 0.05f;
 constexpr int kSmokeTestFrames = 240;
-constexpr int kSmokeEditFrame = 60;
+constexpr int kSmokeEditTimeoutMs = 3000;
 constexpr float kSmokeDeltaTime = 1.0f / 60.0f;
 const glm::vec3 kPlayerSpawn(0.0f, 20.0f, 0.0f);
 const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
@@ -264,6 +265,7 @@ int main(int argc, char** argv) {
     streaming.SetProfiler(&profiler);
 
     auto lastTime = std::chrono::steady_clock::now();
+    const auto smokeStartTime = lastTime;
     auto fpsTimer = lastTime;
     int frames = 0;
     bool escPressed = false;
@@ -566,12 +568,34 @@ int main(int argc, char** argv) {
             playerChunk = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
             streaming.Tick(playerChunk, chunkRegistry, mesher);
 
-            if (smokeTest && !smokeEditRequested && smokeFrames >= kSmokeEditFrame) {
-                smokeEditRequested = true;
+            if (smokeTest && !smokeEditRequested) {
                 voxel::WorldBlockCoord target{voxel::kChunkSize - 1, 1, 0};
-                smokeEditSucceeded = voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockAir);
-                if (!smokeEditSucceeded) {
-                    std::cerr << "[Smoke] Block edit failed.\n";
+                voxel::ChunkCoord targetChunk = voxel::WorldToChunkCoord(target, voxel::kChunkSize);
+                auto entry = chunkRegistry.TryGetEntry(targetChunk);
+                const bool ready = entry &&
+                                   entry->generationState.load(std::memory_order_acquire) ==
+                                       voxel::GenerationState::Ready &&
+                                   entry->chunk;
+                const auto smokeElapsed =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(now - smokeStartTime);
+
+                if (ready) {
+                    smokeEditRequested = true;
+                    smokeEditSucceeded = voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockAir);
+                    if (!smokeEditSucceeded) {
+                        std::cerr << "[Smoke] Block edit failed.\n";
+                        smokeFailed = true;
+                    }
+                } else if (smokeElapsed.count() >= kSmokeEditTimeoutMs) {
+                    std::cerr << "[Smoke] Block edit precondition failed for chunk (" << targetChunk.x << ", "
+                              << targetChunk.y << ", " << targetChunk.z << "): entry="
+                              << (entry ? "set" : "null");
+                    if (entry) {
+                        std::cerr << " state="
+                                  << static_cast<int>(entry->generationState.load(std::memory_order_acquire))
+                                  << " chunk=" << (entry->chunk ? "set" : "null");
+                    }
+                    std::cerr << '\n';
                     smokeFailed = true;
                 }
             }

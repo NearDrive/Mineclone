@@ -49,6 +49,8 @@ jobs:
         run: cmake --build build-sanitize --config Debug
 
       - name: Smoke Test (Sanitizers)
+        env:
+          LSAN_OPTIONS: suppressions=ci/lsan.supp
         run: xvfb-run -a ./build-sanitize/Mineclone --smoke-test --no-gl-debug
 
   windows:

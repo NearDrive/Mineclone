@@ -141,6 +141,7 @@ ChunkReadHandle ChunkRegistry::AcquireChunkRead(const ChunkCoord& coord) const {
     ChunkReadHandle handle;
     auto entry = TryGetEntry(coord);
     if (!entry || entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
+#ifndef NDEBUG
         std::cerr << "[ChunkRegistry] AcquireChunkRead failed for chunk (" << coord.x << ", " << coord.y << ", "
                   << coord.z << "): entry=" << (entry ? "set" : "null");
         if (entry) {
@@ -148,6 +149,7 @@ ChunkReadHandle ChunkRegistry::AcquireChunkRead(const ChunkCoord& coord) const {
                       << " chunk=" << (entry->chunk ? "set" : "null");
         }
         std::cerr << '\n';
+#endif
         return handle;
     }
 
@@ -155,10 +157,12 @@ ChunkReadHandle ChunkRegistry::AcquireChunkRead(const ChunkCoord& coord) const {
     handle.lock = std::shared_lock<std::shared_mutex>(entry->dataMutex);
     handle.chunk = entry->chunk.get();
     if (!handle.chunk) {
+#ifndef NDEBUG
         std::cerr << "[ChunkRegistry] AcquireChunkRead failed for chunk (" << coord.x << ", " << coord.y << ", "
                   << coord.z << "): entry=set state="
                   << static_cast<int>(entry->generationState.load(std::memory_order_acquire))
                   << " chunk=null\n";
+#endif
         handle.lock.unlock();
         handle.entry.reset();
     }
@@ -210,11 +214,13 @@ void ChunkRegistry::SetBlock(const WorldBlockCoord& world, BlockId id) {
     const bool chunkIsNull = !entry->chunk;
     const auto stateAfter = entry->generationState.load(std::memory_order_acquire);
     if (chunkIsNull || stateAfter != GenerationState::Ready) {
+#ifndef NDEBUG
         std::cerr << "[ChunkRegistry] SetBlock world(" << world.x << ", " << world.y << ", " << world.z
                   << ") chunk(" << chunkCoord.x << ", " << chunkCoord.y << ", " << chunkCoord.z << ") local("
                   << local.x << ", " << local.y << ", " << local.z << ") state "
                   << static_cast<int>(stateBefore) << "->" << static_cast<int>(stateAfter) << " chunk "
                   << (chunkWasNull ? "null" : "set") << "->" << (chunkIsNull ? "null" : "set") << '\n';
+#endif
     }
     entry->chunk->Set(local.x, local.y, local.z, id);
     entry->dirty.store(true, std::memory_order_release);
