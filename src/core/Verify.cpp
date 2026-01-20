@@ -5,6 +5,7 @@
 #include <atomic>
 #include <filesystem>
 #include <iostream>
+#include <shared_mutex>
 
 #include "core/WorkerPool.h"
 #include "persistence/ChunkStorage.h"
@@ -83,13 +84,27 @@ void CheckRegistryReadOnly(VerifyState& state) {
 void CheckRaycast(VerifyState& state) {
     using namespace voxel;
     ChunkRegistry registry;
+    ChunkCoord coord{0, 0, 0};
+    auto entry = registry.GetOrCreateEntry(coord);
+    {
+        std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
+        entry->chunk = std::make_unique<Chunk>();
+        entry->generationState.store(GenerationState::Ready, std::memory_order_release);
+        entry->dirty.store(false, std::memory_order_release);
+    }
     registry.SetBlock({0, 0, 0}, kBlockStone);
     Require(registry.GetBlockOrAir({0, 0, 0}) == kBlockStone,
             "SetBlock then GetBlockOrAir mismatch in CheckRaycast", state);
     const glm::vec3 origin(0.5f, 2.5f, 0.5f);
     const glm::vec3 dir(0.0f, -1.0f, 0.0f);
     RaycastHit hit = RaycastBlocks(registry, origin, dir, 10.0f);
-    Require(hit.hit && hit.block == glm::ivec3(0, 0, 0), "Raycast did not hit expected block.", state);
+    if (!(hit.hit && hit.block == glm::ivec3(0, 0, 0))) {
+        Require(false,
+                "Raycast expected (0,0,0) but got hit=" + std::to_string(hit.hit) + " block=(" +
+                    std::to_string(hit.block.x) + "," + std::to_string(hit.block.y) + "," +
+                    std::to_string(hit.block.z) + ") t=" + std::to_string(hit.t),
+                state);
+    }
 
     const glm::ivec3 edgeBlock(kChunkSize - 1, 0, 0);
     registry.SetBlock({edgeBlock.x, edgeBlock.y, edgeBlock.z}, kBlockStone);
