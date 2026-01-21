@@ -25,7 +25,7 @@ int stbi_write_png(char const* filename, int w, int h, int comp, const void* dat
 
 namespace {
 
-constexpr std::uint8_t kPngSignature[8] = {0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+constexpr std::uint8_t kPngSignatureWrite[8] = {0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
 
 std::uint32_t Crc32(const std::uint8_t* data, std::size_t length) {
     std::uint32_t crc = 0xffffffffu;
@@ -117,7 +117,7 @@ int stbi_write_png(char const* filename, int w, int h, int comp, const void* dat
     WriteU32(zlib, adler);
 
     std::vector<std::uint8_t> png;
-    png.insert(png.end(), std::begin(kPngSignature), std::end(kPngSignature));
+    png.insert(png.end(), std::begin(kPngSignatureWrite), std::end(kPngSignatureWrite));
 
     std::vector<std::uint8_t> ihdr;
     WriteU32(ihdr, static_cast<std::uint32_t>(w));

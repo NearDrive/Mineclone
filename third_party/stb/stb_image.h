@@ -30,7 +30,7 @@ void stbi_image_free(void* retval_from_stbi_load);
 
 namespace {
 
-constexpr std::uint8_t kPngSignature[8] = {0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+constexpr std::uint8_t kPngSignatureRead[8] = {0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
 
 std::uint32_t ReadU32(const std::uint8_t* data) {
     return (static_cast<std::uint32_t>(data[0]) << 24u) |
@@ -102,7 +102,7 @@ stbi_uc* stbi_load(char const* filename, int* x, int* y, int* comp, int req_comp
     if (!ReadFile(filename, fileData)) {
         return nullptr;
     }
-    if (fileData.size() < 8 || std::memcmp(fileData.data(), kPngSignature, 8) != 0) {
+    if (fileData.size() < 8 || std::memcmp(fileData.data(), kPngSignatureRead, 8) != 0) {
         return nullptr;
     }
     std::size_t offset = 8;

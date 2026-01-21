@@ -94,24 +94,24 @@ std::shared_ptr<voxel::ChunkEntry> BuildTestChunk(voxel::ChunkRegistry& registry
 }
 
 bool CreateFramebuffer(int width, int height, GLuint& fbo, GLuint& color, GLuint& depth) {
-    glGenFramebuffers(1, &fbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glad_glGenFramebuffers(1, &fbo);
+    glad_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
-    glGenTextures(1, &color);
-    glBindTexture(GL_TEXTURE_2D, color);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
+    glad_glGenTextures(1, &color);
+    glad_glBindTexture(GL_TEXTURE_2D, color);
+    glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glad_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color, 0);
 
-    glGenRenderbuffers(1, &depth);
-    glBindRenderbuffer(GL_RENDERBUFFER, depth);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depth);
+    glad_glGenRenderbuffers(1, &depth);
+    glad_glBindRenderbuffer(GL_RENDERBUFFER, depth);
+    glad_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+    glad_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, depth);
 
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    GLenum status = glad_glCheckFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         std::cerr << "[RenderTest] Framebuffer incomplete: 0x" << std::hex << status << std::dec << '\n';
         return false;
@@ -174,22 +174,22 @@ int RunRenderTest(const RenderTestOptions& options) {
 #ifndef NDEBUG
     if (options.enableGlDebug) {
         GLint flags = 0;
-        glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
+        glad_glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
         if (flags & GL_CONTEXT_FLAG_DEBUG_BIT) {
-            glEnable(GL_DEBUG_OUTPUT);
-            glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-            glDebugMessageCallback(debugCallback, nullptr);
-            glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
+            glad_glEnable(GL_DEBUG_OUTPUT);
+            glad_glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+            glad_glDebugMessageCallback(debugCallback, nullptr);
+            glad_glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
         }
     }
 #endif
 
-    glDisable(GL_DITHER);
-    glDisable(GL_FRAMEBUFFER_SRGB);
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glFrontFace(GL_CCW);
+    glad_glDisable(GL_DITHER);
+    glad_glDisable(GL_FRAMEBUFFER_SRGB);
+    glad_glEnable(GL_DEPTH_TEST);
+    glad_glEnable(GL_CULL_FACE);
+    glad_glCullFace(GL_BACK);
+    glad_glFrontFace(GL_CCW);
 
     Shader shader;
     std::string shaderError;
@@ -205,13 +205,13 @@ int RunRenderTest(const RenderTestOptions& options) {
     GLuint depth = 0;
     if (!CreateFramebuffer(options.width, options.height, fbo, color, depth)) {
         if (color != 0) {
-            glDeleteTextures(1, &color);
+            glad_glDeleteTextures(1, &color);
         }
         if (depth != 0) {
-            glDeleteRenderbuffers(1, &depth);
+            glad_glDeleteRenderbuffers(1, &depth);
         }
         if (fbo != 0) {
-            glDeleteFramebuffers(1, &fbo);
+            glad_glDeleteFramebuffers(1, &fbo);
         }
         glfwDestroyWindow(window);
         glfwTerminate();
@@ -223,9 +223,9 @@ int RunRenderTest(const RenderTestOptions& options) {
     auto entry = BuildTestChunk(chunkRegistry, mesher, options.seed);
     if (!entry) {
         std::cerr << "[RenderTest] Failed to build test chunk.\n";
-        glDeleteFramebuffers(1, &fbo);
-        glDeleteTextures(1, &color);
-        glDeleteRenderbuffers(1, &depth);
+        glad_glDeleteFramebuffers(1, &fbo);
+        glad_glDeleteTextures(1, &color);
+        glad_glDeleteRenderbuffers(1, &depth);
         glfwDestroyWindow(window);
         glfwTerminate();
         return EXIT_FAILURE;
@@ -238,12 +238,12 @@ int RunRenderTest(const RenderTestOptions& options) {
     const glm::mat4 view = glm::lookAt(eye, target, glm::vec3(0.0f, 1.0f, 0.0f));
     const glm::vec3 lightDir = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
 
-    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glViewport(0, 0, options.width, options.height);
+    glad_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glad_glViewport(0, 0, options.width, options.height);
 
     for (int frame = 0; frame < options.frames; ++frame) {
-        glClearColor(kClearColor.r, kClearColor.g, kClearColor.b, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glad_glClearColor(kClearColor.r, kClearColor.g, kClearColor.b, 1.0f);
+        glad_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         shader.use();
         shader.setMat4("uProjection", projection);
@@ -252,13 +252,13 @@ int RunRenderTest(const RenderTestOptions& options) {
         entry->mesh.Draw();
     }
 
-    glFinish();
+    glad_glFinish();
 
     std::vector<std::uint8_t> pixels(static_cast<std::size_t>(options.width) *
                                      static_cast<std::size_t>(options.height) * 4u);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadBuffer(GL_COLOR_ATTACHMENT0);
-    glReadPixels(0, 0, options.width, options.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glad_glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glad_glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glad_glReadPixels(0, 0, options.width, options.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 
     std::filesystem::path outputPath = options.outputPath;
     if (!stbi_write_png(outputPath.string().c_str(), options.width, options.height, 4, pixels.data(),
@@ -266,9 +266,9 @@ int RunRenderTest(const RenderTestOptions& options) {
         std::cerr << "[RenderTest] Failed to write PNG: " << outputPath << '\n';
         entry->mesh.DestroyGpu();
         chunkRegistry.DestroyAll();
-        glDeleteFramebuffers(1, &fbo);
-        glDeleteTextures(1, &color);
-        glDeleteRenderbuffers(1, &depth);
+        glad_glDeleteFramebuffers(1, &fbo);
+        glad_glDeleteTextures(1, &color);
+        glad_glDeleteRenderbuffers(1, &depth);
         glfwDestroyWindow(window);
         glfwTerminate();
         return EXIT_FAILURE;
@@ -301,9 +301,9 @@ int RunRenderTest(const RenderTestOptions& options) {
 
     entry->mesh.DestroyGpu();
     chunkRegistry.DestroyAll();
-    glDeleteFramebuffers(1, &fbo);
-    glDeleteTextures(1, &color);
-    glDeleteRenderbuffers(1, &depth);
+    glad_glDeleteFramebuffers(1, &fbo);
+    glad_glDeleteTextures(1, &color);
+    glad_glDeleteRenderbuffers(1, &depth);
     glfwDestroyWindow(window);
     glfwTerminate();
 
