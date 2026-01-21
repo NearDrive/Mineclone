@@ -33,6 +33,7 @@
 #include "math/Frustum.h"
 #include "persistence/ChunkStorage.h"
 #include "renderer/DebugDraw.h"
+#include "renderer/RenderTest.h"
 #include "voxel/Chunk.h"
 #include "voxel/ChunkBounds.h"
 #include "voxel/ChunkMesh.h"
@@ -159,6 +160,22 @@ int main(int argc, char** argv) {
     }
 
     const bool smokeTest = options.smokeTest;
+    const bool renderTest = options.renderTest;
+    if (renderTest) {
+        renderer::RenderTestOptions renderOptions;
+        renderOptions.outputPath = options.renderTestOut;
+        renderOptions.width = options.renderTestWidth;
+        renderOptions.height = options.renderTestHeight;
+        renderOptions.frames = options.renderTestFrames;
+        renderOptions.seed = options.renderTestSeed;
+        if (options.renderTestCompare) {
+            renderOptions.comparePath = options.renderTestComparePath;
+        }
+#ifndef NDEBUG
+        renderOptions.enableGlDebug = !options.noGlDebug;
+#endif
+        return renderer::RunRenderTest(renderOptions);
+    }
     const bool allowInput = !smokeTest;
 #ifndef NDEBUG
     const bool enableGlDebug = !options.noGlDebug;

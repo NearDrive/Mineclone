@@ -31,6 +31,15 @@ jobs:
       - name: Smoke Test (Debug)
         run: xvfb-run -a ./build-debug/Mineclone --smoke-test --no-gl-debug
 
+      - name: Render Test (Debug)
+        run: xvfb-run -a ./build-debug/Mineclone --render-test --render-test-out render_test.png --render-test-size 256 256 --render-test-frames 3 --render-test-seed 1337 --no-gl-debug
+
+      - name: Upload Render Test Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-test-linux
+          path: render_test.png
+
   linux-sanitize:
     runs-on: ubuntu-latest
     steps:
