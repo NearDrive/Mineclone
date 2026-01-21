@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xorg-dev libgl1-mesa-dev xvfb
+
+      - name: Configure Release
+        run: cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Release
+        run: cmake --build build-release --config Release
+
+      - name: Configure Debug
+        run: cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build Debug
+        run: cmake --build build-debug --config Debug
+
+      - name: Smoke Test (Debug)
+        run: xvfb-run -a ./build-debug/Mineclone --smoke-test --no-gl-debug
+
+  linux-sanitize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xorg-dev libgl1-mesa-dev xvfb
+
+      - name: Configure Sanitizers
+        run: cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DMINECLONE_SANITIZE=ON
+
+      - name: Build Sanitizers
+        run: cmake --build build-sanitize --config Debug
+
+      - name: Smoke Test (Sanitizers)
+        env:
+          LSAN_OPTIONS: suppressions=ci/lsan.supp
+        run: xvfb-run -a ./build-sanitize/Mineclone --smoke-test --no-gl-debug
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Release
+        run: cmake -S . -B build
+
+      - name: Build Release
+        run: cmake --build build --config Release

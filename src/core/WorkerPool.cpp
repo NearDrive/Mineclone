@@ -4,6 +4,7 @@
 #include <iostream>
 #include <shared_mutex>
 
+#include "core/Assert.h"
 #include "voxel/ChunkMesher.h"
 #include "voxel/ChunkRegistry.h"
 
@@ -19,6 +20,9 @@ void WorkerPool::Start(std::size_t threadCount,
     Stop();
 
     stop_.store(false);
+    if (threadCount == 0) {
+        threadCount = 1;
+    }
     generateQueue_ = &generateQueue;
     meshQueue_ = &meshQueue;
     readyQueue_ = &readyQueue;
@@ -48,6 +52,8 @@ void WorkerPool::Stop() {
         }
     }
     threads_.clear();
+    MC_ASSERT(threads_.empty(), "Worker threads did not shut down cleanly.");
+    std::cout << "[Workers] Stopped worker threads.\n";
 }
 
 void WorkerPool::NotifyWork() {
