@@ -272,19 +272,21 @@ int main(int argc, char** argv) {
     streamingConfig.maxChunkCreatesPerFrame = 3;
     streamingConfig.maxChunkMeshesPerFrame = 2;
     streamingConfig.maxGpuUploadsPerFrame = 3;
-    streamingConfig.workerThreads = smokeTest ? 1 : 2;
+    streamingConfig.workerThreads = smokeTest ? 0 : 2;
 
     voxel::ChunkStreaming streaming(streamingConfig);
     streaming.SetStorage(&chunkStorage);
     core::Profiler profiler;
     core::WorkerPool workerPool;
-    workerPool.Start(static_cast<std::size_t>(streamingConfig.workerThreads),
-                     streaming.GenerateQueue(),
-                     streaming.MeshQueue(),
-                     streaming.UploadQueue(),
-                     chunkRegistry,
-                     mesher,
-                     &profiler);
+    if (streamingConfig.workerThreads > 0) {
+        workerPool.Start(static_cast<std::size_t>(streamingConfig.workerThreads),
+                         streaming.GenerateQueue(),
+                         streaming.MeshQueue(),
+                         streaming.UploadQueue(),
+                         chunkRegistry,
+                         mesher,
+                         &profiler);
+    }
     streaming.SetWorkerThreads(workerPool.ThreadCount());
     streaming.SetProfiler(&profiler);
 
