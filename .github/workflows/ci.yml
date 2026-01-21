@@ -14,7 +14,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xorg-dev libgl1-mesa-dev xvfb
+          sudo apt-get install -y xorg-dev libgl1-mesa-dev xvfb gdb
 
       - name: Configure Release
         run: cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
@@ -28,8 +28,15 @@ jobs:
       - name: Build Debug
         run: cmake --build build-debug --config Debug
 
-      - name: Smoke Test (Debug)
-        run: xvfb-run -a ./build-debug/Mineclone --smoke-test --no-gl-debug
+      - name: Smoke Test (Debug) - gdb backtrace on crash
+        run: |
+          set -e
+          xvfb-run -a gdb -q -batch \
+            -ex "set pagination off" \
+            -ex "run --smoke-test --no-gl-debug" \
+            -ex "bt" \
+            -ex "bt full" \
+            --args ./build-debug/Mineclone
 
   linux-sanitize:
     runs-on: ubuntu-latest
