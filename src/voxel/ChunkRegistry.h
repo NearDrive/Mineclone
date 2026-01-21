@@ -77,6 +77,7 @@ public:
 
     bool HasChunk(const ChunkCoord& coord) const;
 
+    // AcquireChunkRead may fail (missing/not-ready chunk); callers must handle missing chunks safely.
     ChunkReadHandle AcquireChunkRead(const ChunkCoord& coord) const;
 
     BlockId GetBlock(const WorldBlockCoord& world) const;
