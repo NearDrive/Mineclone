@@ -148,8 +148,9 @@ ChunkReadHandle ChunkRegistry::AcquireChunkRead(const ChunkCoord& coord) const {
         const auto nowMs =
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
                 .count();
-        const auto previous = lastLogMs.load(std::memory_order_relaxed);
-        if (nowMs - previous >= 1000 && lastLogMs.compare_exchange_strong(previous, nowMs)) {
+        std::int64_t previous = lastLogMs.load(std::memory_order_relaxed);
+        if (nowMs - previous >= 1000 &&
+            lastLogMs.compare_exchange_strong(previous, nowMs, std::memory_order_relaxed)) {
             std::cerr << "[ChunkRegistry] AcquireChunkRead failed for chunk (" << coord.x << ", " << coord.y << ", "
                       << coord.z << "): entry=" << (entry ? "set" : "null");
             if (entry) {
