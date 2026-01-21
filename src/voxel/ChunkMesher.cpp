@@ -27,6 +27,12 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const C
         if (nx >= 0 && nx < kChunkSize && ny >= 0 && ny < kChunkSize && nz >= 0 && nz < kChunkSize) {
             return chunk.Get(nx, ny, nz);
         }
+        const int outX = nx < 0 || nx >= kChunkSize;
+        const int outY = ny < 0 || ny >= kChunkSize;
+        const int outZ = nz < 0 || nz >= kChunkSize;
+        if ((outX + outY + outZ) != 1) {
+            return kBlockAir;
+        }
         if (nx < 0) {
             return neighborNegX ? neighborNegX.chunk->Get(nx + kChunkSize, ny, nz) : kBlockAir;
         }
