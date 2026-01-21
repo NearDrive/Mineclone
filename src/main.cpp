@@ -10,14 +10,17 @@
 #include <cmath>
 #include <csignal>
 #include <cstdlib>
-#include <execinfo.h>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
+
+#if defined(__linux__)
+#include <execinfo.h>
 #include <unistd.h>
+#endif
 
 #include "Camera.h"
 #include "Shader.h"
@@ -269,7 +272,7 @@ int main(int argc, char** argv) {
     streamingConfig.maxChunkCreatesPerFrame = 3;
     streamingConfig.maxChunkMeshesPerFrame = 2;
     streamingConfig.maxGpuUploadsPerFrame = 3;
-    streamingConfig.workerThreads = smokeTest ? 0 : 2;
+    streamingConfig.workerThreads = smokeTest ? 1 : 2;
 
     voxel::ChunkStreaming streaming(streamingConfig);
     streaming.SetStorage(&chunkStorage);
@@ -614,7 +617,7 @@ int main(int argc, char** argv) {
 
                 if (ready || smokeChunkEnsured) {
                     smokeEditRequested = true;
-                    smokeEditSucceeded = voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockAir);
+                    smokeEditSucceeded = voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockDirt);
                     if (!smokeEditSucceeded) {
                         std::cerr << "[Smoke] Block edit failed.\n";
                         smokeFailed = true;
@@ -632,6 +635,10 @@ int main(int argc, char** argv) {
                     smokeFailed = true;
                 }
             }
+        }
+
+        if (smokeTest && smokeFailed) {
+            break;
         }
 
         std::size_t distanceCulled = 0;

@@ -20,6 +20,9 @@ void WorkerPool::Start(std::size_t threadCount,
     Stop();
 
     stop_.store(false);
+    if (threadCount == 0) {
+        threadCount = 1;
+    }
     generateQueue_ = &generateQueue;
     meshQueue_ = &meshQueue;
     readyQueue_ = &readyQueue;
