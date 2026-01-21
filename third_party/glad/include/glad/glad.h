@@ -124,7 +124,9 @@ typedef void (APIENTRY *PFNGLBUFFERDATAPROC)(GLenum target, GLsizeiptr size, con
 typedef void (APIENTRY *PFNGLENABLEVERTEXATTRIBARRAYPROC)(GLuint index);
 typedef void (APIENTRY *PFNGLVERTEXATTRIBPOINTERPROC)(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer);
 typedef GLint (APIENTRY *PFNGLGETUNIFORMLOCATIONPROC)(GLuint program, const GLchar *name);
+typedef void (APIENTRY *PFNGLUNIFORM3FVPROC)(GLint location, GLsizei count, const GLfloat *value);
 typedef void (APIENTRY *PFNGLUNIFORMMATRIX4FVPROC)(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
+typedef void (APIENTRY *PFNGLDRAWELEMENTSPROC)(GLenum mode, GLsizei count, GLenum type, const void *indices);
 typedef void (APIENTRY *PFNGLDRAWARRAYSPROC)(GLenum mode, GLint first, GLsizei count);
 typedef void (APIENTRY *PFNGLDELETEVERTEXARRAYSPROC)(GLsizei n, const GLuint *arrays);
 typedef void (APIENTRY *PFNGLDELETEBUFFERSPROC)(GLsizei n, const GLuint *buffers);
@@ -161,7 +163,9 @@ GLAPI PFNGLBUFFERDATAPROC glad_glBufferData;
 GLAPI PFNGLENABLEVERTEXATTRIBARRAYPROC glad_glEnableVertexAttribArray;
 GLAPI PFNGLVERTEXATTRIBPOINTERPROC glad_glVertexAttribPointer;
 GLAPI PFNGLGETUNIFORMLOCATIONPROC glad_glGetUniformLocation;
+GLAPI PFNGLUNIFORM3FVPROC glad_glUniform3fv;
 GLAPI PFNGLUNIFORMMATRIX4FVPROC glad_glUniformMatrix4fv;
+GLAPI PFNGLDRAWELEMENTSPROC glad_glDrawElements;
 GLAPI PFNGLDRAWARRAYSPROC glad_glDrawArrays;
 GLAPI PFNGLDELETEVERTEXARRAYSPROC glad_glDeleteVertexArrays;
 GLAPI PFNGLDELETEBUFFERSPROC glad_glDeleteBuffers;
@@ -198,7 +202,9 @@ GLAPI PFNGLDEBUGMESSAGECONTROLPROC glad_glDebugMessageControl;
 #define glEnableVertexAttribArray glad_glEnableVertexAttribArray
 #define glVertexAttribPointer glad_glVertexAttribPointer
 #define glGetUniformLocation glad_glGetUniformLocation
+#define glUniform3fv glad_glUniform3fv
 #define glUniformMatrix4fv glad_glUniformMatrix4fv
+#define glDrawElements glad_glDrawElements
 #define glDrawArrays glad_glDrawArrays
 #define glDeleteVertexArrays glad_glDeleteVertexArrays
 #define glDeleteBuffers glad_glDeleteBuffers

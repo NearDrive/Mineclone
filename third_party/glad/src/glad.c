@@ -32,7 +32,9 @@ PFNGLBUFFERDATAPROC glad_glBufferData = NULL;
 PFNGLENABLEVERTEXATTRIBARRAYPROC glad_glEnableVertexAttribArray = NULL;
 PFNGLVERTEXATTRIBPOINTERPROC glad_glVertexAttribPointer = NULL;
 PFNGLGETUNIFORMLOCATIONPROC glad_glGetUniformLocation = NULL;
+PFNGLUNIFORM3FVPROC glad_glUniform3fv = NULL;
 PFNGLUNIFORMMATRIX4FVPROC glad_glUniformMatrix4fv = NULL;
+PFNGLDRAWELEMENTSPROC glad_glDrawElements = NULL;
 PFNGLDRAWARRAYSPROC glad_glDrawArrays = NULL;
 PFNGLDELETEVERTEXARRAYSPROC glad_glDeleteVertexArrays = NULL;
 PFNGLDELETEBUFFERSPROC glad_glDeleteBuffers = NULL;
@@ -78,7 +80,9 @@ int gladLoadGLLoader(GLADloadproc load) {
     glad_glEnableVertexAttribArray = (PFNGLENABLEVERTEXATTRIBARRAYPROC)glad_get_proc(load, "glEnableVertexAttribArray");
     glad_glVertexAttribPointer = (PFNGLVERTEXATTRIBPOINTERPROC)glad_get_proc(load, "glVertexAttribPointer");
     glad_glGetUniformLocation = (PFNGLGETUNIFORMLOCATIONPROC)glad_get_proc(load, "glGetUniformLocation");
+    glad_glUniform3fv = (PFNGLUNIFORM3FVPROC)glad_get_proc(load, "glUniform3fv");
     glad_glUniformMatrix4fv = (PFNGLUNIFORMMATRIX4FVPROC)glad_get_proc(load, "glUniformMatrix4fv");
+    glad_glDrawElements = (PFNGLDRAWELEMENTSPROC)glad_get_proc(load, "glDrawElements");
     glad_glDrawArrays = (PFNGLDRAWARRAYSPROC)glad_get_proc(load, "glDrawArrays");
     glad_glDeleteVertexArrays = (PFNGLDELETEVERTEXARRAYSPROC)glad_get_proc(load, "glDeleteVertexArrays");
     glad_glDeleteBuffers = (PFNGLDELETEBUFFERSPROC)glad_get_proc(load, "glDeleteBuffers");
@@ -93,8 +97,8 @@ int gladLoadGLLoader(GLADloadproc load) {
         !glad_glDeleteShader || !glad_glUseProgram || !glad_glDeleteProgram || !glad_glGenVertexArrays ||
         !glad_glBindVertexArray || !glad_glGenBuffers || !glad_glBindBuffer || !glad_glBufferData ||
         !glad_glEnableVertexAttribArray || !glad_glVertexAttribPointer || !glad_glGetUniformLocation ||
-        !glad_glUniformMatrix4fv || !glad_glDrawArrays || !glad_glDeleteVertexArrays || !glad_glDeleteBuffers ||
-        !glad_glGetIntegerv) {
+        !glad_glUniform3fv || !glad_glUniformMatrix4fv || !glad_glDrawElements || !glad_glDrawArrays ||
+        !glad_glDeleteVertexArrays || !glad_glDeleteBuffers || !glad_glGetIntegerv) {
         fprintf(stderr, "[glad] Failed to load one or more OpenGL functions.\n");
         return 0;
     }
