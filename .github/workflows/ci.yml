@@ -32,23 +32,13 @@ jobs:
         run: xvfb-run -a ./build-debug/Mineclone --smoke-test --no-gl-debug
 
       - name: Render Test (Debug)
-        run: xvfb-run -a ./build-debug/Mineclone --render-test --render-test-out render_test.png --render-test-size 256 256 --render-test-frames 3 --render-test-seed 1337 --no-gl-debug
-
-      - name: Render Test (Debug) Logs
         run: |
           ulimit -c unlimited
-          xvfb-run -a ./build-debug/Mineclone --render-test --render-test-out render_test.png --render-test-size 256 256 --render-test-frames 3 --render-test-seed 1337 --no-gl-debug > render_test.log 2>&1 || true
-          echo "=== render_test.log ==="
+          xvfb-run -a ./build-debug/Mineclone --render-test --render-test-out render_test.png --render-test-size 256 256 --render-test-frames 3 --render-test-seed 1337 --no-gl-debug > render_test.log 2>&1
           cat render_test.log
-          echo "=== core files ==="
-          ls -al core* || true
-
-      - name: Render Test (Debug) Backtrace
-        run: |
-          gdb --batch -ex "set pagination off" -ex "run" -ex "bt full" \
-            --args ./build-debug/Mineclone --render-test --render-test-out render_test.png --render-test-size 256 256 --render-test-frames 3 --render-test-seed 1337 --no-gl-debug
 
       - name: Upload Render Test Logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: render-test-logs
@@ -57,10 +47,18 @@ jobs:
             core*
 
       - name: Upload Render Test Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: render-test-linux
           path: render_test.png
+
+      - name: Render Test (Debug) Backtrace
+        if: always()
+        run: |
+          ls -al core* || true
+          gdb --batch -ex "set pagination off" -ex "run" -ex "bt full" \
+            --args ./build-debug/Mineclone --render-test --render-test-out render_test.png --render-test-size 256 256 --render-test-frames 3 --render-test-seed 1337 --no-gl-debug
 
   linux-sanitize:
     runs-on: ubuntu-latest
