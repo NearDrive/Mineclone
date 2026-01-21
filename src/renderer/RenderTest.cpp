@@ -57,6 +57,16 @@ void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severi
 }
 #endif
 
+void EnsureEmptyChunk(voxel::ChunkRegistry& registry, const voxel::ChunkCoord& coord) {
+    auto entry = registry.GetOrCreateEntry(coord);
+    std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
+    if (!entry->chunk) {
+        entry->chunk = std::make_unique<voxel::Chunk>();
+        entry->chunk->Fill(voxel::kBlockAir);
+    }
+    entry->generationState.store(voxel::GenerationState::Ready, std::memory_order_release);
+}
+
 std::shared_ptr<voxel::ChunkEntry> BuildTestChunk(voxel::ChunkRegistry& registry, voxel::ChunkMesher& mesher,
                                                   std::uint32_t seed) {
     const voxel::ChunkCoord coord{0, 0, 0};
@@ -82,6 +92,13 @@ std::shared_ptr<voxel::ChunkEntry> BuildTestChunk(voxel::ChunkRegistry& registry
         entry->generationState.store(voxel::GenerationState::Ready, std::memory_order_release);
         entry->meshingState.store(voxel::MeshingState::Ready, std::memory_order_release);
     }
+
+    EnsureEmptyChunk(registry, {coord.x + 1, coord.y, coord.z});
+    EnsureEmptyChunk(registry, {coord.x - 1, coord.y, coord.z});
+    EnsureEmptyChunk(registry, {coord.x, coord.y + 1, coord.z});
+    EnsureEmptyChunk(registry, {coord.x, coord.y - 1, coord.z});
+    EnsureEmptyChunk(registry, {coord.x, coord.y, coord.z + 1});
+    EnsureEmptyChunk(registry, {coord.x, coord.y, coord.z - 1});
 
     voxel::ChunkMeshCpu cpuMesh;
     mesher.BuildMesh(coord, *entry->chunk, registry, cpuMesh);
