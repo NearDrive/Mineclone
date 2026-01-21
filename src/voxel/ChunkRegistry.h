@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -78,7 +79,7 @@ public:
     bool HasChunk(const ChunkCoord& coord) const;
 
     // AcquireChunkRead may fail (missing/not-ready chunk); callers must handle missing chunks safely.
-    ChunkReadHandle AcquireChunkRead(const ChunkCoord& coord) const;
+    std::optional<ChunkReadHandle> AcquireChunkRead(const ChunkCoord& coord) const;
 
     BlockId GetBlock(const WorldBlockCoord& world) const;
     BlockId GetBlockOrAir(const WorldBlockCoord& world) const;

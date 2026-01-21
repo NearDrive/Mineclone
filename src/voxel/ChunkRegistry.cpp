@@ -139,8 +139,7 @@ bool ChunkRegistry::HasChunk(const ChunkCoord& coord) const {
     return entry && entry->generationState.load(std::memory_order_acquire) == GenerationState::Ready;
 }
 
-ChunkReadHandle ChunkRegistry::AcquireChunkRead(const ChunkCoord& coord) const {
-    ChunkReadHandle handle;
+std::optional<ChunkReadHandle> ChunkRegistry::AcquireChunkRead(const ChunkCoord& coord) const {
     auto entry = TryGetEntry(coord);
     if (!entry || entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
 #ifndef NDEBUG
@@ -159,9 +158,10 @@ ChunkReadHandle ChunkRegistry::AcquireChunkRead(const ChunkCoord& coord) const {
             std::cerr << '\n';
         }
 #endif
-        return handle;
+        return std::nullopt;
     }
 
+    ChunkReadHandle handle;
     handle.entry = entry;
     handle.lock = std::shared_lock<std::shared_mutex>(entry->dataMutex);
     handle.chunk = entry->chunk.get();
@@ -174,6 +174,7 @@ ChunkReadHandle ChunkRegistry::AcquireChunkRead(const ChunkCoord& coord) const {
 #endif
         handle.lock.unlock();
         handle.entry.reset();
+        return std::nullopt;
     }
     return handle;
 }
@@ -181,21 +182,21 @@ ChunkReadHandle ChunkRegistry::AcquireChunkRead(const ChunkCoord& coord) const {
 BlockId ChunkRegistry::GetBlock(const WorldBlockCoord& world) const {
     ChunkCoord chunkCoord = WorldToChunkCoord(world, kChunkSize);
     LocalCoord local = WorldToLocalCoord(world, kChunkSize);
-    ChunkReadHandle handle = AcquireChunkRead(chunkCoord);
+    auto handle = AcquireChunkRead(chunkCoord);
     if (!handle) {
         return SampleFlatWorld(world);
     }
-    return handle.chunk->Get(local.x, local.y, local.z);
+    return handle->chunk->Get(local.x, local.y, local.z);
 }
 
 BlockId ChunkRegistry::GetBlockOrAir(const WorldBlockCoord& world) const {
     ChunkCoord chunkCoord = WorldToChunkCoord(world, kChunkSize);
     LocalCoord local = WorldToLocalCoord(world, kChunkSize);
-    ChunkReadHandle handle = AcquireChunkRead(chunkCoord);
+    auto handle = AcquireChunkRead(chunkCoord);
     if (!handle) {
         return kBlockAir;
     }
-    return handle.chunk->Get(local.x, local.y, local.z);
+    return handle->chunk->Get(local.x, local.y, local.z);
 }
 
 void ChunkRegistry::SetBlock(const WorldBlockCoord& world, BlockId id) {
