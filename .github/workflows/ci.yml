@@ -34,8 +34,11 @@ jobs:
       - name: Render Test (Debug)
         run: |
           ulimit -c unlimited
+          set +e
           xvfb-run -a ./build-debug/Mineclone --render-test --render-test-out render_test.png --render-test-size 256 256 --render-test-frames 3 --render-test-seed 1337 --no-gl-debug > render_test.log 2>&1
+          status=$?
           cat render_test.log
+          exit $status
 
       - name: Upload Render Test Logs
         if: always()
@@ -57,7 +60,7 @@ jobs:
         if: always()
         run: |
           ls -al core* || true
-          gdb --batch -ex "set pagination off" -ex "run" -ex "bt full" \
+          xvfb-run -a gdb --batch -ex "set pagination off" -ex "run" -ex "bt full" \
             --args ./build-debug/Mineclone --render-test --render-test-out render_test.png --render-test-size 256 256 --render-test-frames 3 --render-test-seed 1337 --no-gl-debug
 
   linux-sanitize:
