@@ -8,6 +8,7 @@ PFNGLCLEARCOLORPROC glad_glClearColor = NULL;
 PFNGLCLEARPROC glad_glClear = NULL;
 PFNGLENABLEPROC glad_glEnable = NULL;
 PFNGLDISABLEPROC glad_glDisable = NULL;
+PFNGLGETERRORPROC glad_glGetError = NULL;
 PFNGLCULLFACEPROC glad_glCullFace = NULL;
 PFNGLFRONTFACEPROC glad_glFrontFace = NULL;
 PFNGLVIEWPORTPROC glad_glViewport = NULL;
@@ -75,6 +76,7 @@ int gladLoadGLLoader(GLADloadproc load) {
     glad_glClear = (PFNGLCLEARPROC)glad_get_proc(load, "glClear");
     glad_glEnable = (PFNGLENABLEPROC)glad_get_proc(load, "glEnable");
     glad_glDisable = (PFNGLDISABLEPROC)glad_get_proc(load, "glDisable");
+    glad_glGetError = (PFNGLGETERRORPROC)glad_get_proc(load, "glGetError");
     glad_glCullFace = (PFNGLCULLFACEPROC)glad_get_proc(load, "glCullFace");
     glad_glFrontFace = (PFNGLFRONTFACEPROC)glad_get_proc(load, "glFrontFace");
     glad_glViewport = (PFNGLVIEWPORTPROC)glad_get_proc(load, "glViewport");
@@ -128,7 +130,8 @@ int gladLoadGLLoader(GLADloadproc load) {
     glad_glDebugMessageCallback = (PFNGLDEBUGMESSAGECALLBACKPROC)glad_get_proc(load, "glDebugMessageCallback");
     glad_glDebugMessageControl = (PFNGLDEBUGMESSAGECONTROLPROC)glad_get_proc(load, "glDebugMessageControl");
 
-    if (!glad_glGetString || !glad_glClearColor || !glad_glClear || !glad_glEnable || !glad_glCullFace ||
+    if (!glad_glGetString || !glad_glClearColor || !glad_glClear || !glad_glEnable || !glad_glDisable ||
+        !glad_glGetError || !glad_glCullFace ||
         !glad_glFrontFace || !glad_glViewport || !glad_glCreateShader || !glad_glShaderSource ||
         !glad_glCompileShader || !glad_glGetShaderiv || !glad_glGetShaderInfoLog || !glad_glCreateProgram ||
         !glad_glAttachShader || !glad_glLinkProgram || !glad_glGetProgramiv || !glad_glGetProgramInfoLog ||

@@ -107,6 +107,7 @@ typedef void (APIENTRY *GLDEBUGPROC)(GLenum source, GLenum type, GLuint id, GLen
 #define GL_DEBUG_SEVERITY_LOW 0x9148
 #define GL_DEBUG_SEVERITY_NOTIFICATION 0x826B
 #define GL_DONT_CARE 0x1100
+#define GL_NO_ERROR 0
 
 #ifdef __cplusplus
 typedef void *(*GLADloadproc)(const char *name);
@@ -123,6 +124,7 @@ typedef void (APIENTRY *PFNGLCLEARCOLORPROC)(GLfloat red, GLfloat green, GLfloat
 typedef void (APIENTRY *PFNGLCLEARPROC)(GLbitfield mask);
 typedef void (APIENTRY *PFNGLENABLEPROC)(GLenum cap);
 typedef void (APIENTRY *PFNGLDISABLEPROC)(GLenum cap);
+typedef GLenum (APIENTRY *PFNGLGETERRORPROC)(void);
 typedef void (APIENTRY *PFNGLCULLFACEPROC)(GLenum mode);
 typedef void (APIENTRY *PFNGLFRONTFACEPROC)(GLenum mode);
 typedef void (APIENTRY *PFNGLVIEWPORTPROC)(GLint x, GLint y, GLsizei width, GLsizei height);
@@ -185,6 +187,7 @@ GLAPI PFNGLCLEARCOLORPROC glad_glClearColor;
 GLAPI PFNGLCLEARPROC glad_glClear;
 GLAPI PFNGLENABLEPROC glad_glEnable;
 GLAPI PFNGLDISABLEPROC glad_glDisable;
+GLAPI PFNGLGETERRORPROC glad_glGetError;
 GLAPI PFNGLCULLFACEPROC glad_glCullFace;
 GLAPI PFNGLFRONTFACEPROC glad_glFrontFace;
 GLAPI PFNGLVIEWPORTPROC glad_glViewport;
@@ -243,6 +246,7 @@ GLAPI PFNGLDEBUGMESSAGECONTROLPROC glad_glDebugMessageControl;
 #define glClear glad_glClear
 #define glEnable glad_glEnable
 #define glDisable glad_glDisable
+#define glGetError glad_glGetError
 #define glCullFace glad_glCullFace
 #define glFrontFace glad_glFrontFace
 #define glViewport glad_glViewport

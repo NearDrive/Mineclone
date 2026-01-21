@@ -156,6 +156,7 @@ int RunRenderTest(const RenderTestOptions& options) {
         return EXIT_FAILURE;
     }
 
+    std::cout << "[RenderTest] Initializing GLFW...\n";
     glfwSetErrorCallback(glfwErrorCallback);
     if (!glfwInit()) {
         std::cerr << "[RenderTest] Failed to initialize GLFW.\n";
@@ -181,12 +182,17 @@ int RunRenderTest(const RenderTestOptions& options) {
 
     glfwMakeContextCurrent(window);
 
+    std::cout << "[RenderTest] Loading GLAD...\n";
     if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
         std::cerr << "[RenderTest] Failed to initialize GLAD.\n";
         glfwDestroyWindow(window);
         glfwTerminate();
         return EXIT_FAILURE;
     }
+    std::cout << "[RenderTest] GLAD loaded. ReadBuffer="
+              << (glad_glReadBuffer ? "yes" : "no")
+              << " Framebuffers=" << (glad_glGenFramebuffers ? "yes" : "no")
+              << " Textures=" << (glad_glGenTextures ? "yes" : "no") << '\n';
 
 #ifndef NDEBUG
     if (options.enableGlDebug) {
@@ -216,10 +222,12 @@ int RunRenderTest(const RenderTestOptions& options) {
         glfwTerminate();
         return EXIT_FAILURE;
     }
+    std::cout << "[RenderTest] Shaders loaded.\n";
 
     GLuint fbo = 0;
     GLuint color = 0;
     GLuint depth = 0;
+    std::cout << "[RenderTest] Creating framebuffer...\n";
     if (!CreateFramebuffer(options.width, options.height, fbo, color, depth)) {
         if (color != 0) {
             glad_glDeleteTextures(1, &color);
@@ -234,9 +242,11 @@ int RunRenderTest(const RenderTestOptions& options) {
         glfwTerminate();
         return EXIT_FAILURE;
     }
+    std::cout << "[RenderTest] Framebuffer ready.\n";
 
     voxel::ChunkRegistry chunkRegistry;
     voxel::ChunkMesher mesher;
+    std::cout << "[RenderTest] Building test chunk...\n";
     auto entry = BuildTestChunk(chunkRegistry, mesher, options.seed);
     if (!entry) {
         std::cerr << "[RenderTest] Failed to build test chunk.\n";
@@ -247,6 +257,7 @@ int RunRenderTest(const RenderTestOptions& options) {
         glfwTerminate();
         return EXIT_FAILURE;
     }
+    std::cout << "[RenderTest] Chunk mesh ready.\n";
 
     const float aspect = static_cast<float>(options.width) / static_cast<float>(options.height);
     const glm::mat4 projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 200.0f);
@@ -267,6 +278,10 @@ int RunRenderTest(const RenderTestOptions& options) {
         shader.setMat4("uView", view);
         shader.setVec3("uLightDir", lightDir);
         entry->mesh.Draw();
+    }
+    GLenum frameError = glad_glGetError();
+    if (frameError != GL_NO_ERROR) {
+        std::cerr << "[RenderTest] GL error after draw: 0x" << std::hex << frameError << std::dec << '\n';
     }
 
     glad_glFinish();
