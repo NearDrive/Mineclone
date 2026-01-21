@@ -274,7 +274,9 @@ int RunRenderTest(const RenderTestOptions& options) {
     std::vector<std::uint8_t> pixels(static_cast<std::size_t>(options.width) *
                                      static_cast<std::size_t>(options.height) * 4u);
     glad_glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glad_glReadBuffer(GL_COLOR_ATTACHMENT0);
+    if (glad_glReadBuffer) {
+        glad_glReadBuffer(GL_COLOR_ATTACHMENT0);
+    }
     glad_glReadPixels(0, 0, options.width, options.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 
     std::filesystem::path outputPath = options.outputPath;
