@@ -219,13 +219,29 @@ void ChunkStreaming::ProcessUploads(ChunkRegistry& registry) {
             break;
         }
 
-        auto entry = ready.entry.lock();
-        if (!entry || !entry->wanted.load()) {
-            std::cout << "[Streaming] Dropped mesh upload for unloaded chunk.\n";
-            if (entry) {
-                entry->gpuState.store(GpuState::NotUploaded, std::memory_order_release);
-                entry->meshingState.store(MeshingState::NotScheduled, std::memory_order_release);
-            }
+        auto entry = registry.TryGetEntry(ready.coord);
+        if (!entry) {
+#ifndef NDEBUG
+            std::cout << "[Streaming] Dropped mesh upload for missing chunk (" << ready.coord.x << ", "
+                      << ready.coord.y << ", " << ready.coord.z << ").\n";
+#endif
+            continue;
+        }
+        auto queuedEntry = ready.entry.lock();
+        if (queuedEntry && queuedEntry.get() != entry.get()) {
+#ifndef NDEBUG
+            std::cout << "[Streaming] Dropped mesh upload for stale chunk (" << ready.coord.x << ", "
+                      << ready.coord.y << ", " << ready.coord.z << ").\n";
+#endif
+            continue;
+        }
+        if (!entry->wanted.load()) {
+#ifndef NDEBUG
+            std::cout << "[Streaming] Dropped mesh upload for unloaded chunk (" << ready.coord.x << ", "
+                      << ready.coord.y << ", " << ready.coord.z << ").\n";
+#endif
+            entry->gpuState.store(GpuState::NotUploaded, std::memory_order_release);
+            entry->meshingState.store(MeshingState::NotScheduled, std::memory_order_release);
             continue;
         }
 
