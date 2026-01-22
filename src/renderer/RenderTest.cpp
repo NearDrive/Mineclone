@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -68,8 +69,8 @@ void EnsureEmptyChunk(voxel::ChunkRegistry& registry, const voxel::ChunkCoord& c
 }
 
 std::shared_ptr<voxel::ChunkEntry> BuildTestChunk(voxel::ChunkRegistry& registry, voxel::ChunkMesher& mesher,
-                                                  std::uint32_t seed) {
-    const voxel::ChunkCoord coord{0, 0, 0};
+                                                  std::uint32_t seed, const voxel::ChunkCoord& coord,
+                                                  bool variant) {
     auto entry = registry.GetOrCreateEntry(coord);
     {
         std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
@@ -87,6 +88,21 @@ std::shared_ptr<voxel::ChunkEntry> BuildTestChunk(voxel::ChunkRegistry& registry
         const int pillarZ = 10;
         for (int y = 1; y <= pillarHeight; ++y) {
             entry->chunk->Set(pillarX, y, pillarZ, voxel::kBlockStone);
+        }
+
+        if (variant) {
+            const int platformY = 1;
+            for (int z = 4; z <= 7; ++z) {
+                for (int x = 4; x <= 7; ++x) {
+                    entry->chunk->Set(x, platformY, z, voxel::kBlockStone);
+                }
+            }
+
+            const int towerX = 5;
+            const int towerZ = 12;
+            for (int y = 1; y <= 6; ++y) {
+                entry->chunk->Set(towerX, y, towerZ, voxel::kBlockStone);
+            }
         }
 
         entry->generationState.store(voxel::GenerationState::Ready, std::memory_order_release);
@@ -147,6 +163,22 @@ bool ReadPngPixels(const std::string& path, int& width, int& height, std::vector
     stbi_image_free(data);
     return true;
 }
+
+struct RenderSceneConfig {
+    int id = 0;
+    voxel::ChunkCoord coord{0, 0, 0};
+    bool variant = false;
+    glm::vec3 eye{0.0f};
+    glm::vec3 target{0.0f};
+    glm::vec3 up{0.0f, 1.0f, 0.0f};
+    std::string filename;
+};
+
+struct RenderSceneResult {
+    int id = 0;
+    std::string filename;
+    std::string checksum;
+};
 
 } // namespace
 
@@ -244,103 +276,162 @@ int RunRenderTest(const RenderTestOptions& options) {
     }
     std::cout << "[RenderTest] Framebuffer ready.\n";
 
-    voxel::ChunkRegistry chunkRegistry;
-    voxel::ChunkMesher mesher;
-    std::cout << "[RenderTest] Building test chunk...\n";
-    auto entry = BuildTestChunk(chunkRegistry, mesher, options.seed);
-    if (!entry) {
-        std::cerr << "[RenderTest] Failed to build test chunk.\n";
-        glad_glDeleteFramebuffers(1, &fbo);
-        glad_glDeleteTextures(1, &color);
-        glad_glDeleteRenderbuffers(1, &depth);
-        glfwDestroyWindow(window);
-        glfwTerminate();
-        return EXIT_FAILURE;
-    }
-    std::cout << "[RenderTest] Chunk mesh ready.\n";
-
     const float aspect = static_cast<float>(options.width) / static_cast<float>(options.height);
     const glm::mat4 projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 200.0f);
-    const glm::vec3 eye(16.0f, 20.0f, 48.0f);
-    const glm::vec3 target(16.0f, 4.0f, 16.0f);
-    const glm::mat4 view = glm::lookAt(eye, target, glm::vec3(0.0f, 1.0f, 0.0f));
     const glm::vec3 lightDir = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
 
-    glad_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glad_glViewport(0, 0, options.width, options.height);
+    const std::filesystem::path outputBase = std::filesystem::path(options.outputPath).parent_path();
+    std::vector<RenderSceneConfig> scenes;
+    scenes.push_back(RenderSceneConfig{
+        0,
+        voxel::ChunkCoord{0, 0, 0},
+        false,
+        glm::vec3(16.0f, 20.0f, 48.0f),
+        glm::vec3(16.0f, 4.0f, 16.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        "render_test_scene0.png"});
+    scenes.push_back(RenderSceneConfig{
+        1,
+        voxel::ChunkCoord{0, 0, 0},
+        false,
+        glm::vec3(48.0f, 18.0f, 20.0f),
+        glm::vec3(16.0f, 6.0f, 16.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        "render_test_scene1.png"});
+    scenes.push_back(RenderSceneConfig{
+        2,
+        voxel::ChunkCoord{0, 0, 0},
+        true,
+        glm::vec3(12.0f, 30.0f, 32.0f),
+        glm::vec3(16.0f, 6.0f, 16.0f),
+        glm::vec3(0.0f, 1.0f, 0.0f),
+        "render_test_scene2.png"});
 
-    for (int frame = 0; frame < options.frames; ++frame) {
-        glad_glClearColor(kClearColor.r, kClearColor.g, kClearColor.b, 1.0f);
-        glad_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    std::vector<RenderSceneResult> results;
+    results.reserve(scenes.size());
+    bool compareOk = true;
+    for (const auto& scene : scenes) {
+        voxel::ChunkRegistry chunkRegistry;
+        voxel::ChunkMesher mesher;
+        std::cout << "[RenderTest] Building test chunk...\n";
+        auto entry = BuildTestChunk(chunkRegistry, mesher, options.seed, scene.coord, scene.variant);
+        if (!entry) {
+            std::cerr << "[RenderTest] Failed to build test chunk.\n";
+            compareOk = false;
+            break;
+        }
+        std::cout << "[RenderTest] Chunk mesh ready.\n";
 
-        shader.use();
-        shader.setMat4("uProjection", projection);
-        shader.setMat4("uView", view);
-        shader.setVec3("uLightDir", lightDir);
-        entry->mesh.Draw();
-    }
-    GLenum frameError = glad_glGetError();
-    if (frameError != GL_NO_ERROR) {
-        std::cerr << "[RenderTest] GL error after draw: 0x" << std::hex << frameError << std::dec << '\n';
-    }
+        glad_glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+        glad_glViewport(0, 0, options.width, options.height);
+        glad_glDisable(GL_DITHER);
+        glad_glDisable(GL_FRAMEBUFFER_SRGB);
+        glad_glEnable(GL_DEPTH_TEST);
+        glad_glEnable(GL_CULL_FACE);
+        glad_glCullFace(GL_BACK);
+        glad_glFrontFace(GL_CCW);
 
-    glad_glFinish();
+        const glm::mat4 view = glm::lookAt(scene.eye, scene.target, scene.up);
+        for (int frame = 0; frame < options.frames; ++frame) {
+            glad_glClearColor(kClearColor.r, kClearColor.g, kClearColor.b, 1.0f);
+            glad_glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(options.width) *
-                                     static_cast<std::size_t>(options.height) * 4u);
-    glad_glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    if (glad_glReadBuffer) {
-        glad_glReadBuffer(GL_COLOR_ATTACHMENT0);
-    }
-    glad_glReadPixels(0, 0, options.width, options.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+            shader.use();
+            shader.setMat4("uProjection", projection);
+            shader.setMat4("uView", view);
+            shader.setVec3("uLightDir", lightDir);
+            entry->mesh.Draw();
+        }
+        GLenum frameError = glad_glGetError();
+        if (frameError != GL_NO_ERROR) {
+            std::cerr << "[RenderTest] GL error after draw (scene " << scene.id << "): 0x"
+                      << std::hex << frameError << std::dec << '\n';
+        }
 
-    std::filesystem::path outputPath = options.outputPath;
-    if (!stbi_write_png(outputPath.string().c_str(), options.width, options.height, 4, pixels.data(),
-                        options.width * 4)) {
-        std::cerr << "[RenderTest] Failed to write PNG: " << outputPath << '\n';
+        glad_glFinish();
+
+        std::vector<std::uint8_t> pixels(static_cast<std::size_t>(options.width) *
+                                         static_cast<std::size_t>(options.height) * 4u);
+        glad_glPixelStorei(GL_PACK_ALIGNMENT, 1);
+        if (glad_glReadBuffer) {
+            glad_glReadBuffer(GL_COLOR_ATTACHMENT0);
+        }
+        glad_glReadPixels(0, 0, options.width, options.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+
+        const std::filesystem::path outputPath = outputBase / scene.filename;
+        if (!stbi_write_png(outputPath.string().c_str(), options.width, options.height, 4, pixels.data(),
+                            options.width * 4)) {
+            std::cerr << "[RenderTest] Failed to write PNG: " << outputPath << '\n';
+            entry->mesh.DestroyGpu();
+            chunkRegistry.DestroyAll();
+            compareOk = false;
+            break;
+        }
+
+        const std::string checksum = core::Sha256Hex(pixels);
+        std::cout << "[RenderTest] scene=" << scene.id
+                  << " size=" << options.width << "x" << options.height
+                  << " frames=" << options.frames
+                  << " seed=" << options.seed
+                  << " checksum=" << checksum
+                  << " wrote=\"" << outputPath.string() << "\"\n";
+
+        if (options.comparePath && scene.id == 0) {
+            int compareWidth = 0;
+            int compareHeight = 0;
+            std::vector<std::uint8_t> comparePixels;
+            if (!ReadPngPixels(*options.comparePath, compareWidth, compareHeight, comparePixels)) {
+                std::cerr << "[RenderTest] Failed to read compare PNG: " << *options.comparePath << '\n';
+                compareOk = false;
+            } else if (compareWidth != options.width || compareHeight != options.height) {
+                std::cerr << "[RenderTest] Compare PNG size mismatch ("
+                          << compareWidth << "x" << compareHeight << ").\n";
+                compareOk = false;
+            } else if (comparePixels != pixels) {
+                std::cerr << "[RenderTest] Compare PNG mismatch.\n";
+                compareOk = false;
+            }
+        }
+
+        results.push_back(RenderSceneResult{scene.id, scene.filename, checksum});
+
         entry->mesh.DestroyGpu();
         chunkRegistry.DestroyAll();
-        glad_glDeleteFramebuffers(1, &fbo);
-        glad_glDeleteTextures(1, &color);
-        glad_glDeleteRenderbuffers(1, &depth);
-        glfwDestroyWindow(window);
-        glfwTerminate();
-        return EXIT_FAILURE;
-    }
 
-    const std::string checksum = core::Sha256Hex(pixels);
-    std::cout << "[RenderTest] size=" << options.width << "x" << options.height
-              << " frames=" << options.frames
-              << " seed=" << options.seed
-              << " checksum=" << checksum << '\n';
-    std::cout << "[RenderTest] wrote: " << outputPath << '\n';
-
-    bool compareOk = true;
-    if (options.comparePath) {
-        int compareWidth = 0;
-        int compareHeight = 0;
-        std::vector<std::uint8_t> comparePixels;
-        if (!ReadPngPixels(*options.comparePath, compareWidth, compareHeight, comparePixels)) {
-            std::cerr << "[RenderTest] Failed to read compare PNG: " << *options.comparePath << '\n';
-            compareOk = false;
-        } else if (compareWidth != options.width || compareHeight != options.height) {
-            std::cerr << "[RenderTest] Compare PNG size mismatch ("
-                      << compareWidth << "x" << compareHeight << ").\n";
-            compareOk = false;
-        } else if (comparePixels != pixels) {
-            std::cerr << "[RenderTest] Compare PNG mismatch.\n";
-            compareOk = false;
+        if (!compareOk) {
+            break;
         }
     }
 
-    entry->mesh.DestroyGpu();
-    chunkRegistry.DestroyAll();
     shader.Destroy();
     glad_glDeleteFramebuffers(1, &fbo);
     glad_glDeleteTextures(1, &color);
     glad_glDeleteRenderbuffers(1, &depth);
     glfwDestroyWindow(window);
     glfwTerminate();
+
+    if (compareOk) {
+        const int sceneWidth = 5;
+        const int fileWidth = 24;
+        const int hashWidth = 64;
+        const std::string divider = "+" + std::string(sceneWidth + 2, '-') +
+                                    "+" + std::string(fileWidth + 2, '-') +
+                                    "+" + std::string(hashWidth + 2, '-') + "+";
+        std::cout << "[RenderTest] Summary\n";
+        std::cout << divider << '\n';
+        std::cout << "| " << std::left << std::setw(sceneWidth) << "Scene"
+                  << " | " << std::left << std::setw(fileWidth) << "File"
+                  << " | " << std::left << std::setw(hashWidth) << "SHA256"
+                  << " |\n";
+        std::cout << divider << '\n';
+        for (const auto& result : results) {
+            std::cout << "| " << std::left << std::setw(sceneWidth) << result.id
+                      << " | " << std::left << std::setw(fileWidth) << result.filename
+                      << " | " << std::left << std::setw(hashWidth) << result.checksum
+                      << " |\n";
+        }
+        std::cout << divider << '\n';
+    }
 
     if (!compareOk) {
         return EXIT_FAILURE;

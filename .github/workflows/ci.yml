@@ -76,12 +76,12 @@ jobs:
             render_test.log
             core*
 
-      - name: Upload Render Test Artifact
+      - name: Upload Render Test Images
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: render-test-linux
-          path: render_test.png
+          name: render-test-images
+          path: render_test_scene*.png
 
       - name: Render Test (Debug) Backtrace
         if: always()
