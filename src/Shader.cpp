@@ -53,8 +53,13 @@ bool linkProgram(GLuint program, std::string& errorOut) {
 Shader::Shader() = default;
 
 Shader::~Shader() {
+    Destroy();
+}
+
+void Shader::Destroy() {
     if (programId_ != 0) {
         glDeleteProgram(programId_);
+        programId_ = 0;
     }
 }
 

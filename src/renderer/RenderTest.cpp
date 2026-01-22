@@ -335,6 +335,7 @@ int RunRenderTest(const RenderTestOptions& options) {
 
     entry->mesh.DestroyGpu();
     chunkRegistry.DestroyAll();
+    shader.Destroy();
     glad_glDeleteFramebuffers(1, &fbo);
     glad_glDeleteTextures(1, &color);
     glad_glDeleteRenderbuffers(1, &depth);
