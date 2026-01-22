@@ -58,6 +58,7 @@ jobs:
 
       - name: Render Test (Debug) Backtrace
         if: always()
+        continue-on-error: true
         run: |
           ls -al core* || true
           xvfb-run -a gdb --batch -ex "set pagination off" -ex "run" -ex "bt full" \
