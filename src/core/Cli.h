@@ -8,6 +8,8 @@ namespace core {
 struct CliOptions {
     bool smokeTest = false;
     bool interactionTest = false;
+    bool soakTest = false;
+    bool soakTestLong = false;
     bool worldTest = false;
     bool noGlDebug = false;
     bool help = false;
@@ -19,6 +21,7 @@ struct CliOptions {
     std::uint32_t renderTestSeed = 1337;
     bool renderTestCompare = false;
     std::string renderTestComparePath;
+    std::uint32_t soakTestSeed = 1337;
 };
 
 bool ParseCli(int argc, char** argv, CliOptions& options, std::string& error);

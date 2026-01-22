@@ -52,10 +52,31 @@ bool ParseCli(int argc, char** argv, CliOptions& options, std::string& error) {
             options.smokeTest = true;
         } else if (arg == "--interaction-test") {
             options.interactionTest = true;
+        } else if (arg == "--soak-test") {
+            options.soakTest = true;
+        } else if (arg == "--soak-test-long") {
+            options.soakTestLong = true;
         } else if (arg == "--world-test") {
             options.worldTest = true;
         } else if (arg == "--render-test") {
             options.renderTest = true;
+        } else if (arg == "--seed" || arg.rfind("--seed=", 0) == 0) {
+            std::string seedText;
+            if (arg == "--seed") {
+                if (i + 1 >= argc) {
+                    error = "Missing value for --seed";
+                    return false;
+                }
+                seedText = argv[++i];
+            } else {
+                seedText = arg.substr(std::string("--seed=").size());
+            }
+            std::uint32_t seed = 0;
+            if (!ParseUint32(seedText, seed)) {
+                error = "Invalid value for --seed";
+                return false;
+            }
+            options.soakTestSeed = seed;
         } else if (arg == "--render-test-out") {
             if (i + 1 >= argc) {
                 error = "Missing value for --render-test-out";
@@ -123,6 +144,9 @@ std::string Usage(const char* argv0) {
         << "  --smoke-test     Run deterministic smoke test and exit.\n"
         << "  --interaction-test\n"
         << "                  Run deterministic interaction smoke test and exit.\n"
+        << "  --soak-test      Run deterministic headless soak test and exit.\n"
+        << "  --soak-test-long Run deterministic long soak test and exit.\n"
+        << "  --seed <u32>     Soak test seed override (default: 1337).\n"
         << "  --world-test     Run deterministic world logic test and exit.\n"
         << "  --render-test    Run deterministic offscreen render test and exit.\n"
         << "  --render-test-out <path>\n"

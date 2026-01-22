@@ -37,6 +37,7 @@
 #include "core/WorkerPool.h"
 #include "game/Player.h"
 #include "math/Frustum.h"
+#include "persistence/ChunkFormat.h"
 #include "persistence/ChunkStorage.h"
 #include "renderer/DebugDraw.h"
 #include "renderer/RenderTest.h"
@@ -73,6 +74,17 @@ constexpr float kInteractionDeltaTime = 1.0f / 60.0f;
 constexpr int kInteractionRenderRadius = 3;
 constexpr int kInteractionLoadRadius = 4;
 constexpr int kInteractionWorkerThreads = 1;
+constexpr int kSoakTestFrames = 2000;
+constexpr int kSoakTestLongFrames = 10000;
+constexpr int kSoakSaveInterval = 200;
+constexpr int kSoakSaveIntervalLong = 500;
+constexpr int kSoakEditStartFrame = 50;
+constexpr int kSoakEditInterval = 100;
+constexpr float kSoakDeltaTime = 1.0f / 60.0f;
+constexpr int kSoakRenderRadius = 4;
+constexpr int kSoakLoadRadius = 6;
+constexpr int kSoakWorkerThreads = 1;
+constexpr int kSoakSyncMaxIterations = 200;
 const glm::vec3 kInteractionMoveDir(-2.0f, 0.0f, -2.0f);
 const glm::vec3 kPlayerSpawn(0.0f, 20.0f, 0.0f);
 const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
@@ -182,6 +194,50 @@ glm::vec2 YawPitchFromDirection(const glm::vec3& direction) {
     return {yaw, pitch};
 }
 
+bool SameWorldCoord(const voxel::WorldBlockCoord& a, const voxel::WorldBlockCoord& b) {
+    return a.x == b.x && a.y == b.y && a.z == b.z;
+}
+
+std::filesystem::path BuildSoakStorageRoot(const std::string& modeLabel) {
+    std::filesystem::path root = std::filesystem::temp_directory_path() / ("mineclone_" + modeLabel);
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root, error);
+    return root;
+}
+
+std::filesystem::path ChunkFilePath(const std::filesystem::path& root, const voxel::ChunkCoord& coord) {
+    std::ostringstream name;
+    name << "chunk_" << coord.x << "_" << coord.y << "_" << coord.z << ".bin";
+    return root / name.str();
+}
+
+glm::vec3 SoakCameraPath(int frame, std::uint32_t seed) {
+    const float seedOffset = static_cast<float>(seed % 1000) * 0.001f;
+    const float t = static_cast<float>(frame) * 0.01f + seedOffset;
+    const float x = std::sin(t) * 40.0f - 10.0f;
+    const float z = std::cos(t * 0.8f) * 40.0f - 10.0f;
+    return {x, 20.0f, z};
+}
+
+bool WaitForStreamingIdle(voxel::ChunkStreaming& streaming,
+                          voxel::ChunkRegistry& registry,
+                          const voxel::ChunkMesher& mesher,
+                          core::WorkerPool& workerPool,
+                          const voxel::ChunkCoord& playerChunk,
+                          int maxIterations) {
+    for (int i = 0; i < maxIterations; ++i) {
+        streaming.Tick(playerChunk, registry, mesher);
+        workerPool.NotifyWork();
+        const voxel::ChunkStreamingStats& stats = streaming.Stats();
+        if (stats.createQueue == 0 && stats.meshQueue == 0 && stats.uploadQueue == 0 &&
+            stats.createdThisFrame == 0 && stats.meshedThisFrame == 0 && stats.uploadedThisFrame == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 #ifndef NDEBUG
 void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severity,
                             GLsizei length, const GLchar* message, const void* userParam) {
@@ -223,6 +279,49 @@ struct InteractionTestState {
     std::string checksum;
 };
 
+struct SoakTestConfig {
+    const char* mode = "soak-test";
+    int frames = kSoakTestFrames;
+    int saveInterval = kSoakSaveInterval;
+};
+
+struct SoakRaycastStep {
+    int frame = 0;
+    glm::vec3 cameraPosition{0.0f};
+    glm::ivec3 targetBlock{0};
+    glm::vec3 direction{0.0f, 0.0f, -1.0f};
+    bool useTarget = false;
+    bool expectHit = false;
+    voxel::BlockId expectedId = voxel::kBlockAir;
+};
+
+struct SoakEditStep {
+    int frame = 0;
+    voxel::WorldBlockCoord coord{0, 0, 0};
+    voxel::BlockId blockId = voxel::kBlockAir;
+    voxel::BlockId expectedId = voxel::kBlockAir;
+};
+
+struct SoakSampleBlock {
+    voxel::WorldBlockCoord coord{0, 0, 0};
+    voxel::BlockId expectedId = voxel::kBlockAir;
+};
+
+struct SoakTestState {
+    bool failed = false;
+    std::string failureMessage;
+    int frames = 0;
+    int edits = 0;
+    int raycasts = 0;
+    int saves = 0;
+    int loads = 0;
+    voxel::ChunkStreamingStats stats;
+    std::string checksum;
+    std::uint32_t seed = 0;
+    int workerThreads = 0;
+    std::filesystem::path storageRoot;
+};
+
 #if defined(__linux__)
 void CrashHandler(int signal) {
     void* frames[64];
@@ -259,6 +358,9 @@ int main(int argc, char** argv) {
 
     const bool smokeTest = options.smokeTest;
     const bool interactionTest = options.interactionTest;
+    const bool soakTest = options.soakTest;
+    const bool soakTestLong = options.soakTestLong;
+    const bool runSoakTest = soakTest || soakTestLong;
     const bool renderTest = options.renderTest;
     if (renderTest) {
         renderer::RenderTestOptions renderOptions;
@@ -283,15 +385,22 @@ int main(int argc, char** argv) {
         }
         return EXIT_SUCCESS;
     }
-    const bool allowInput = !(smokeTest || interactionTest);
+    const bool allowInput = !(smokeTest || interactionTest || runSoakTest);
 #ifndef NDEBUG
     const bool enableGlDebug = !options.noGlDebug;
 #endif
 
+    SoakTestConfig soakConfig;
+    if (soakTestLong) {
+        soakConfig.mode = "soak-test-long";
+        soakConfig.frames = kSoakTestLongFrames;
+        soakConfig.saveInterval = kSoakSaveIntervalLong;
+    }
+
 #ifndef NDEBUG
     const bool shouldRunVerify = true;
 #else
-    const bool shouldRunVerify = smokeTest || interactionTest;
+    const bool shouldRunVerify = smokeTest || interactionTest || runSoakTest;
 #endif
 
     if (shouldRunVerify) {
@@ -364,14 +473,22 @@ int main(int argc, char** argv) {
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
-    setMouseCapture(window, allowInput || interactionTest);
-    if (interactionTest) {
+    setMouseCapture(window, allowInput || interactionTest || runSoakTest);
+    if (interactionTest || runSoakTest) {
         gCamera.setMouseSensitivity(1.0f);
-        SetCameraAngles(gCamera, -135.0f, -89.0f);
+        if (interactionTest) {
+            SetCameraAngles(gCamera, -135.0f, -89.0f);
+        }
     }
 
     bool smokeFailed = false;
     InteractionTestState interactionState;
+    SoakTestState soakState;
+    if (runSoakTest) {
+        soakState.seed = options.soakTestSeed;
+        soakState.workerThreads = kSoakWorkerThreads;
+        soakState.storageRoot = BuildSoakStorageRoot(soakConfig.mode);
+    }
     {
         Shader shader;
         std::string shaderError;
@@ -394,17 +511,24 @@ int main(int argc, char** argv) {
 
         voxel::ChunkRegistry chunkRegistry;
         voxel::ChunkMesher mesher;
-        persistence::ChunkStorage chunkStorage;
+        std::filesystem::path storageRoot = persistence::ChunkStorage::DefaultSavePath();
+        if (runSoakTest) {
+            storageRoot = soakState.storageRoot;
+        }
+        persistence::ChunkStorage chunkStorage(storageRoot);
         chunkRegistry.SetStorage(&chunkStorage);
 
         voxel::ChunkStreamingConfig streamingConfig;
-        streamingConfig.renderRadius = interactionTest ? kInteractionRenderRadius : kRenderRadiusDefault;
-        streamingConfig.loadRadius = interactionTest ? kInteractionLoadRadius : kLoadRadiusDefault;
+        streamingConfig.renderRadius = runSoakTest ? kSoakRenderRadius
+                                                  : (interactionTest ? kInteractionRenderRadius : kRenderRadiusDefault);
+        streamingConfig.loadRadius = runSoakTest ? kSoakLoadRadius
+                                                 : (interactionTest ? kInteractionLoadRadius : kLoadRadiusDefault);
         streamingConfig.maxChunkCreatesPerFrame = 3;
         streamingConfig.maxChunkMeshesPerFrame = 2;
         streamingConfig.maxGpuUploadsPerFrame = 3;
-        streamingConfig.workerThreads =
-            interactionTest ? kInteractionWorkerThreads : (smokeTest ? 0 : 2);
+        streamingConfig.workerThreads = runSoakTest
+            ? kSoakWorkerThreads
+            : (interactionTest ? kInteractionWorkerThreads : (smokeTest ? 0 : 2));
 
         voxel::ChunkStreaming streaming(streamingConfig);
         streaming.SetStorage(&chunkStorage);
@@ -420,6 +544,9 @@ int main(int argc, char** argv) {
                              &profiler);
         }
         streaming.SetWorkerThreads(workerPool.ThreadCount());
+        if (runSoakTest) {
+            soakState.workerThreads = static_cast<int>(workerPool.ThreadCount());
+        }
         streaming.SetProfiler(&profiler);
 
         auto lastTime = std::chrono::steady_clock::now();
@@ -472,6 +599,9 @@ int main(int argc, char** argv) {
         std::size_t interactionRaycastIndex = 0;
         std::size_t interactionEditIndex = 0;
         int interactionFrameIndex = 0;
+        std::size_t soakRaycastIndex = 0;
+        std::size_t soakEditIndex = 0;
+        int soakFrameIndex = 0;
         auto lastClampLogTime = lastTime - std::chrono::seconds(1);
         game::Player player(kPlayerSpawn);
         glm::mat4 projection(1.0f);
@@ -494,6 +624,43 @@ int main(int argc, char** argv) {
             {200, {voxel::kChunkSize, 7, 0}, voxel::kBlockDirt, voxel::kBlockDirt},
         }};
 
+        const std::array<voxel::WorldBlockCoord, 6> kSoakEditCoords = {{
+            {voxel::kChunkSize - 1, 7, 0},
+            {voxel::kChunkSize, 7, 0},
+            {-1, 7, -1},
+            {-voxel::kChunkSize, 7, -voxel::kChunkSize},
+            {0, 7, voxel::kChunkSize - 1},
+            {0, 7, voxel::kChunkSize},
+        }};
+
+        const std::array<SoakRaycastStep, 4> kSoakRaycasts = {{
+            {200, {2.5f, 9.6f, 2.5f}, {2, 7, 2}, {0.0f, 0.0f, -1.0f}, true, true, voxel::kBlockDirt},
+            {800, {0.5f, 20.0f, 0.5f}, {0, 7, 0}, {0.0f, -1.0f, 0.0f}, true, true, voxel::kBlockDirt},
+            {1200, {33.5f, 9.6f, 1.5f}, {33, 7, 1}, {0.0f, 0.0f, -1.0f}, true, true, voxel::kBlockDirt},
+            {1600, {5.0f, 20.0f, 5.0f}, {0, 0, 0}, {0.0f, 1.0f, 0.0f}, false, false, voxel::kBlockAir},
+        }};
+
+        std::vector<SoakEditStep> soakEdits;
+        std::vector<SoakSampleBlock> soakSamples;
+        std::vector<voxel::ChunkCoord> soakTouchedChunks;
+        if (runSoakTest) {
+            soakEdits.reserve(static_cast<std::size_t>(soakConfig.frames / kSoakEditInterval + 2));
+            soakSamples.reserve(kSoakEditCoords.size() + 2);
+            std::vector<voxel::BlockId> expected(kSoakEditCoords.size(), voxel::kBlockDirt);
+            for (int frame = kSoakEditStartFrame; frame < soakConfig.frames; frame += kSoakEditInterval) {
+                std::size_t index = static_cast<std::size_t>((frame - kSoakEditStartFrame) / kSoakEditInterval);
+                index %= kSoakEditCoords.size();
+                voxel::BlockId next = expected[index] == voxel::kBlockDirt ? voxel::kBlockStone : voxel::kBlockDirt;
+                expected[index] = next;
+                soakEdits.push_back({frame, kSoakEditCoords[index], next, next});
+            }
+            for (const auto& coord : kSoakEditCoords) {
+                soakSamples.push_back({coord, voxel::kBlockDirt});
+            }
+            soakSamples.push_back({{0, 7, 0}, voxel::kBlockDirt});
+            soakSamples.push_back({{15, 7, 15}, voxel::kBlockDirt});
+        }
+
     while (!glfwWindowShouldClose(window)) {
         core::ScopedTimer frameTimer(&profiler, core::Metric::Frame);
         auto now = std::chrono::steady_clock::now();
@@ -501,7 +668,10 @@ int main(int argc, char** argv) {
         if (interactionTest) {
             deltaTime = kInteractionDeltaTime;
         }
-        if (!smokeTest && !interactionTest) {
+        if (runSoakTest) {
+            deltaTime = kSoakDeltaTime;
+        }
+        if (!smokeTest && !interactionTest && !runSoakTest) {
             std::chrono::duration<float> delta = now - lastTime;
             deltaTime = delta.count();
             if (deltaTime > kMaxDeltaTime) {
@@ -522,6 +692,8 @@ int main(int argc, char** argv) {
             bool jumpPressed = false;
             if (interactionTest) {
                 desiredDir = kInteractionMoveDir;
+            } else if (runSoakTest) {
+                desiredDir = glm::vec3(0.0f);
             } else if (allowInput) {
                 int escState = glfwGetKey(window, GLFW_KEY_ESCAPE);
                 if (escState == GLFW_PRESS && !escPressed) {
@@ -675,8 +847,21 @@ int main(int argc, char** argv) {
 #endif
             }
 
-            player.Update(chunkRegistry, desiredDir, jumpPressed, deltaTime);
-            gCamera.setPosition(player.Position() + kEyeOffset);
+            if (runSoakTest) {
+                const glm::vec3 cameraPosition = SoakCameraPath(soakFrameIndex, soakState.seed);
+                const glm::vec3 nextPosition = SoakCameraPath(soakFrameIndex + 1, soakState.seed);
+                const glm::vec3 direction = nextPosition - cameraPosition;
+                player.SetPosition(cameraPosition - kEyeOffset);
+                player.ResetVelocity();
+                gCamera.setPosition(cameraPosition);
+                if (glm::length(direction) > 0.001f) {
+                    const glm::vec2 yawPitch = YawPitchFromDirection(direction);
+                    SetCameraAngles(gCamera, yawPitch.x, yawPitch.y);
+                }
+            } else {
+                player.Update(chunkRegistry, desiredDir, jumpPressed, deltaTime);
+                gCamera.setPosition(player.Position() + kEyeOffset);
+            }
 
             glClearColor(0.08f, 0.10f, 0.15f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -701,6 +886,35 @@ int main(int argc, char** argv) {
                 SetCameraAngles(gCamera, yawPitch.x, yawPitch.y);
             }
 
+            if (runSoakTest && soakRaycastIndex < kSoakRaycasts.size() &&
+                soakFrameIndex == kSoakRaycasts[soakRaycastIndex].frame) {
+                voxel::WorldBlockCoord playerBlock{
+                    static_cast<int>(std::floor(player.Position().x)),
+                    static_cast<int>(std::floor(player.Position().y)),
+                    static_cast<int>(std::floor(player.Position().z))};
+                voxel::ChunkCoord playerCoord = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
+                if (!WaitForStreamingIdle(streaming, chunkRegistry, mesher, workerPool,
+                                          playerCoord, kSoakSyncMaxIterations)) {
+                    soakState.failed = true;
+                    soakState.failureMessage = "[SoakTest] Streaming did not reach idle state for raycast.";
+                }
+                const SoakRaycastStep& step = kSoakRaycasts[soakRaycastIndex];
+                player.SetPosition(step.cameraPosition - kEyeOffset);
+                player.ResetVelocity();
+                gCamera.setPosition(step.cameraPosition);
+                if (step.useTarget) {
+                    voxel::WorldBlockCoord worldTarget{step.targetBlock.x, step.targetBlock.y, step.targetBlock.z};
+                    voxel::ChunkCoord chunkCoord = voxel::WorldToChunkCoord(worldTarget, voxel::kChunkSize);
+                    EnsureChunkReady(chunkRegistry, chunkCoord);
+                    const glm::vec2 yawPitch = YawPitchFromDirection(
+                        glm::vec3(step.targetBlock) + glm::vec3(0.5f) - step.cameraPosition);
+                    SetCameraAngles(gCamera, yawPitch.x, yawPitch.y);
+                } else {
+                    const glm::vec2 yawPitch = YawPitchFromDirection(step.direction);
+                    SetCameraAngles(gCamera, yawPitch.x, yawPitch.y);
+                }
+            }
+
             projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 500.0f);
             view = gCamera.getViewMatrix();
             frustum = Frustum::FromMatrix(projection * view);
@@ -709,7 +923,7 @@ int main(int argc, char** argv) {
             currentHit = {};
             hasTarget = false;
             debugDraw.Clear();
-            if (gMouseCaptured || interactionTest) {
+            if (gMouseCaptured || interactionTest || runSoakTest) {
                 currentHit = voxel::RaycastBlocks(chunkRegistry, gCamera.getPosition(), gCamera.getFront(),
                                                   kReachDistance);
                 if (currentHit.hit) {
@@ -863,13 +1077,159 @@ int main(int argc, char** argv) {
                     ++interactionEditIndex;
                 }
             }
+
+            if (runSoakTest && !soakState.failed) {
+                if (soakRaycastIndex < kSoakRaycasts.size() &&
+                    soakFrameIndex == kSoakRaycasts[soakRaycastIndex].frame) {
+                    const SoakRaycastStep& step = kSoakRaycasts[soakRaycastIndex];
+                    ++soakState.raycasts;
+                    if (step.expectHit != currentHit.hit) {
+                        soakState.failed = true;
+                        std::ostringstream message;
+                        message << "[SoakTest] Raycast mismatch at frame " << step.frame
+                                << ": hit=" << currentHit.hit << " expected=" << step.expectHit;
+                        soakState.failureMessage = message.str();
+                    } else if (step.expectHit) {
+                        voxel::WorldBlockCoord worldTarget{step.targetBlock.x, step.targetBlock.y, step.targetBlock.z};
+                        voxel::ChunkCoord expectedChunk = voxel::WorldToChunkCoord(worldTarget, voxel::kChunkSize);
+                        if (!IsChunkReady(chunkRegistry, expectedChunk)) {
+                            soakState.failed = true;
+                            soakState.failureMessage = "[SoakTest] Raycast chunk not ready.";
+                        } else if (currentHit.block != step.targetBlock) {
+                            soakState.failed = true;
+                            std::ostringstream message;
+                            message << "[SoakTest] Raycast block mismatch at frame " << step.frame
+                                    << ": got=(" << currentHit.block.x << ", " << currentHit.block.y << ", "
+                                    << currentHit.block.z << ") expected=(" << step.targetBlock.x << ", "
+                                    << step.targetBlock.y << ", " << step.targetBlock.z << ")";
+                            soakState.failureMessage = message.str();
+                        } else {
+                            voxel::BlockId id = chunkRegistry.GetBlockOrAir(worldTarget);
+                            if (id != step.expectedId) {
+                                soakState.failed = true;
+                                std::ostringstream message;
+                                message << "[SoakTest] Raycast block id mismatch at frame " << step.frame
+                                        << ": got=" << static_cast<int>(id)
+                                        << " expected=" << static_cast<int>(step.expectedId);
+                                soakState.failureMessage = message.str();
+                            }
+                        }
+                    }
+                    ++soakRaycastIndex;
+                }
+
+                if (soakEditIndex < soakEdits.size() &&
+                    soakFrameIndex == soakEdits[soakEditIndex].frame) {
+                    const SoakEditStep& step = soakEdits[soakEditIndex];
+                    voxel::ChunkCoord chunkCoord = voxel::WorldToChunkCoord(step.coord, voxel::kChunkSize);
+                    EnsureChunkReady(chunkRegistry, chunkCoord);
+                    bool edited = voxel::TrySetBlock(chunkRegistry, streaming, step.coord, step.blockId);
+                    ++soakState.edits;
+                    if (!edited) {
+                        soakState.failed = true;
+                        soakState.failureMessage = "[SoakTest] SetBlock failed.";
+                    } else {
+                        voxel::BlockId updated = chunkRegistry.GetBlockOrAir(step.coord);
+                        if (updated != step.expectedId) {
+                            soakState.failed = true;
+                            std::ostringstream message;
+                            message << "[SoakTest] GetBlockOrAir mismatch at frame " << step.frame
+                                    << ": got=" << static_cast<int>(updated)
+                                    << " expected=" << static_cast<int>(step.expectedId);
+                            soakState.failureMessage = message.str();
+                        } else {
+                            bool found = false;
+                            for (const auto& existing : soakTouchedChunks) {
+                                if (existing == chunkCoord) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found) {
+                                soakTouchedChunks.push_back(chunkCoord);
+                            }
+                            for (auto& sample : soakSamples) {
+                                if (SameWorldCoord(sample.coord, step.coord)) {
+                                    sample.expectedId = step.expectedId;
+                                }
+                            }
+                        }
+                    }
+                    ++soakEditIndex;
+                }
+
+                if (soakFrameIndex > 0 && soakFrameIndex % soakConfig.saveInterval == 0) {
+                    voxel::WorldBlockCoord playerBlock{
+                        static_cast<int>(std::floor(player.Position().x)),
+                        static_cast<int>(std::floor(player.Position().y)),
+                        static_cast<int>(std::floor(player.Position().z))};
+                    voxel::ChunkCoord playerCoord = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
+                    if (!WaitForStreamingIdle(streaming, chunkRegistry, mesher, workerPool,
+                                              playerCoord, kSoakSyncMaxIterations)) {
+                        soakState.failed = true;
+                        soakState.failureMessage = "[SoakTest] Streaming did not reach idle state for save.";
+                    } else {
+                        std::size_t saved = chunkRegistry.SaveAllDirty(chunkStorage);
+                        if (saved == 0) {
+                            soakState.failed = true;
+                            soakState.failureMessage = "[SoakTest] Expected dirty chunks for save.";
+                        }
+                        soakState.saves += static_cast<int>(saved);
+                        const std::uintmax_t expectedSize =
+                            persistence::kChunkHeaderSize +
+                            static_cast<std::uintmax_t>(voxel::kChunkVolume * sizeof(voxel::BlockId));
+                        for (const auto& coord : soakTouchedChunks) {
+                            std::filesystem::path chunkPath = ChunkFilePath(soakState.storageRoot, coord);
+                            std::error_code error;
+                            if (!std::filesystem::exists(chunkPath, error)) {
+                                soakState.failed = true;
+                                soakState.failureMessage = "[SoakTest] Chunk file missing after save.";
+                                break;
+                            }
+                            std::uintmax_t fileSize = std::filesystem::file_size(chunkPath, error);
+                            if (error || fileSize != expectedSize) {
+                                soakState.failed = true;
+                                soakState.failureMessage = "[SoakTest] Chunk file size mismatch.";
+                                break;
+                            }
+                            voxel::Chunk loadedChunk;
+                            if (!chunkStorage.LoadChunk(coord, loadedChunk)) {
+                                soakState.failed = true;
+                                soakState.failureMessage = "[SoakTest] Chunk load failed.";
+                                break;
+                            }
+                            ++soakState.loads;
+                            for (const auto& sample : soakSamples) {
+                                if (voxel::WorldToChunkCoord(sample.coord, voxel::kChunkSize) != coord) {
+                                    continue;
+                                }
+                                voxel::LocalCoord local = voxel::WorldToLocalCoord(sample.coord, voxel::kChunkSize);
+                                voxel::BlockId loadedId = loadedChunk.Get(local.x, local.y, local.z);
+                                if (loadedId != sample.expectedId) {
+                                    soakState.failed = true;
+                                    soakState.failureMessage = "[SoakTest] Chunk load sample mismatch.";
+                                    break;
+                                }
+                            }
+                            if (soakState.failed) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if (interactionTest && interactionState.failed) {
             interactionState.frames = interactionFrameIndex + 1;
             interactionState.stats = streaming.Stats();
         }
-        if ((smokeTest && smokeFailed) || (interactionTest && interactionState.failed)) {
+        if (runSoakTest && soakState.failed) {
+            soakState.frames = soakFrameIndex + 1;
+            soakState.stats = streaming.Stats();
+        }
+        if ((smokeTest && smokeFailed) || (interactionTest && interactionState.failed) ||
+            (runSoakTest && soakState.failed)) {
             break;
         }
 
@@ -966,8 +1326,17 @@ int main(int argc, char** argv) {
             }
             ++interactionFrameIndex;
         }
+        if (runSoakTest) {
+            soakState.frames = soakFrameIndex + 1;
+            soakState.stats = streaming.Stats();
+            if (soakFrameIndex + 1 >= soakConfig.frames) {
+                std::cout << "[SoakTest] Completed " << soakState.frames << " frames.\n";
+                break;
+            }
+            ++soakFrameIndex;
+        }
         std::chrono::duration<float> fpsElapsed = now - fpsTimer;
-        if (!interactionTest && fpsElapsed.count() >= 0.25f) {
+        if (!interactionTest && !runSoakTest && fpsElapsed.count() >= 0.25f) {
             float fps = static_cast<float>(frames) / fpsElapsed.count();
             auto round1 = [](float value) { return std::round(value * 10.0f) / 10.0f; };
             std::ostringstream title;
@@ -1090,6 +1459,69 @@ int main(int argc, char** argv) {
             std::cout << "+----------------------+------------------------------------------+\n";
         }
 
+        if (runSoakTest) {
+            std::vector<std::uint8_t> checksumBuffer;
+            checksumBuffer.reserve(512);
+            AppendUint32(checksumBuffer, soakState.seed);
+            AppendInt32(checksumBuffer, soakState.frames);
+            AppendInt32(checksumBuffer, soakState.edits);
+            AppendInt32(checksumBuffer, soakState.raycasts);
+            AppendInt32(checksumBuffer, soakState.saves);
+            AppendInt32(checksumBuffer, soakState.loads);
+            AppendFloat(checksumBuffer, player.Position().x);
+            AppendFloat(checksumBuffer, player.Position().y);
+            AppendFloat(checksumBuffer, player.Position().z);
+            AppendFloat(checksumBuffer, gCamera.getPosition().x);
+            AppendFloat(checksumBuffer, gCamera.getPosition().y);
+            AppendFloat(checksumBuffer, gCamera.getPosition().z);
+            AppendFloat(checksumBuffer, gCamera.getYaw());
+            AppendFloat(checksumBuffer, gCamera.getPitch());
+            AppendInt32(checksumBuffer, soakState.workerThreads);
+
+            for (const auto& sample : soakSamples) {
+                AppendInt32(checksumBuffer, sample.coord.x);
+                AppendInt32(checksumBuffer, sample.coord.y);
+                AppendInt32(checksumBuffer, sample.coord.z);
+                AppendUint16(checksumBuffer, chunkRegistry.GetBlockOrAir(sample.coord));
+            }
+
+            AppendUint32(checksumBuffer, static_cast<std::uint32_t>(soakState.stats.generatedChunksReady));
+            AppendUint32(checksumBuffer, static_cast<std::uint32_t>(soakState.stats.meshedCpuReady));
+            AppendUint32(checksumBuffer, static_cast<std::uint32_t>(soakState.stats.gpuReadyChunks));
+
+            soakState.checksum = core::Sha256Hex(checksumBuffer);
+
+            const std::size_t valueWidth = 42;
+            std::cout << "+--------------------------+------------------------------------------+\n";
+            std::cout << "| Metric                   | Value                                    |\n";
+            std::cout << "+--------------------------+------------------------------------------+\n";
+            std::cout << "| mode                     | " << std::left << std::setw(valueWidth) << soakConfig.mode
+                      << "|\n";
+            std::cout << "| seed                     | " << std::left << std::setw(valueWidth) << soakState.seed
+                      << "|\n";
+            std::cout << "| frames                   | " << std::left << std::setw(valueWidth) << soakState.frames
+                      << "|\n";
+            std::cout << "| worker_threads           | " << std::left << std::setw(valueWidth)
+                      << soakState.workerThreads << "|\n";
+            std::cout << "| raycasts                 | " << std::left << std::setw(valueWidth) << soakState.raycasts
+                      << "|\n";
+            std::cout << "| edits                    | " << std::left << std::setw(valueWidth) << soakState.edits
+                      << "|\n";
+            std::cout << "| saves                    | " << std::left << std::setw(valueWidth) << soakState.saves
+                      << "|\n";
+            std::cout << "| loads                    | " << std::left << std::setw(valueWidth) << soakState.loads
+                      << "|\n";
+            std::cout << "| chunks_generated         | " << std::left << std::setw(valueWidth)
+                      << soakState.stats.generatedChunksReady << "|\n";
+            std::cout << "| chunks_meshed            | " << std::left << std::setw(valueWidth)
+                      << soakState.stats.meshedCpuReady << "|\n";
+            std::cout << "| chunks_uploaded          | " << std::left << std::setw(valueWidth)
+                      << soakState.stats.gpuReadyChunks << "|\n";
+            std::cout << "| final_checksum_sha256    | " << std::left << std::setw(valueWidth)
+                      << soakState.checksum << "|\n";
+            std::cout << "+--------------------------+------------------------------------------+\n";
+        }
+
         workerPool.Stop();
         chunkRegistry.SaveAllDirty(chunkStorage);
         chunkRegistry.DestroyAll();
@@ -1102,6 +1534,10 @@ int main(int argc, char** argv) {
     }
     if (interactionTest && interactionState.failed) {
         std::cerr << interactionState.failureMessage << '\n';
+        return EXIT_FAILURE;
+    }
+    if (runSoakTest && soakState.failed) {
+        std::cerr << soakState.failureMessage << '\n';
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;

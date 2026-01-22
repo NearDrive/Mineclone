@@ -55,6 +55,36 @@ jobs:
       - name: Smoke Test (Debug)
         run: xvfb-run -a ./build-debug/Mineclone --smoke-test --no-gl-debug
 
+      - name: Soak Test (Debug)
+        run: |
+          set -e
+          set -o pipefail
+          mkdir -p ci_artifacts
+          xvfb-run -a ./build-debug/Mineclone --soak-test --no-gl-debug | tee ci_artifacts/soak_general_log.txt
+          python - <<'PY'
+import pathlib
+log_path = pathlib.Path("ci_artifacts/soak_general_log.txt")
+lines = log_path.read_text().splitlines()
+top = None
+bottom = None
+for i, line in enumerate(lines):
+    if line.startswith("+--------------------------+") and i + 1 < len(lines):
+        if "| Metric" in lines[i + 1]:
+            top = i
+for i in range(len(lines) - 1, -1, -1):
+    if "final_checksum_sha256" in lines[i]:
+        for j in range(i, len(lines)):
+            if lines[j].startswith("+--------------------------+"):
+                bottom = j
+                break
+        break
+if top is not None and bottom is not None and bottom >= top:
+    summary = "\n".join(lines[top:bottom + 1]) + "\n"
+    pathlib.Path("ci_artifacts/soak_general_summary.txt").write_text(summary)
+else:
+    pathlib.Path("ci_artifacts/soak_general_summary.txt").write_text("Summary table not found.\n")
+PY
+
       - name: Interaction Test (Debug)
         run: |
           set -e
@@ -73,6 +103,36 @@ jobs:
           cat render_test.log
           exit $status
 
+      - name: Soak Test Long (Debug)
+        run: |
+          set -e
+          set -o pipefail
+          mkdir -p ci_artifacts
+          xvfb-run -a ./build-debug/Mineclone --soak-test-long --no-gl-debug | tee ci_artifacts/soak_long_log.txt
+          python - <<'PY'
+import pathlib
+log_path = pathlib.Path("ci_artifacts/soak_long_log.txt")
+lines = log_path.read_text().splitlines()
+top = None
+bottom = None
+for i, line in enumerate(lines):
+    if line.startswith("+--------------------------+") and i + 1 < len(lines):
+        if "| Metric" in lines[i + 1]:
+            top = i
+for i in range(len(lines) - 1, -1, -1):
+    if "final_checksum_sha256" in lines[i]:
+        for j in range(i, len(lines)):
+            if lines[j].startswith("+--------------------------+"):
+                bottom = j
+                break
+        break
+if top is not None and bottom is not None and bottom >= top:
+    summary = "\n".join(lines[top:bottom + 1]) + "\n"
+    pathlib.Path("ci_artifacts/soak_long_summary.txt").write_text(summary)
+else:
+    pathlib.Path("ci_artifacts/soak_long_summary.txt").write_text("Summary table not found.\n")
+PY
+
       - name: Upload Render Test Logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -88,6 +148,17 @@ jobs:
         with:
           name: interaction-test-logs
           path: interaction_test_log.txt
+      
+      - name: Upload Soak Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-test-logs
+          path: |
+            ci_artifacts/soak_general_log.txt
+            ci_artifacts/soak_general_summary.txt
+            ci_artifacts/soak_long_log.txt
+            ci_artifacts/soak_long_summary.txt
 
       - name: Upload Render Test Images
         if: always()
@@ -137,6 +208,11 @@ jobs:
         env:
           LSAN_OPTIONS: suppressions=ci/lsan.supp
         run: xvfb-run -a ./build-sanitize/Mineclone --smoke-test --no-gl-debug
+
+      - name: Soak Test (Sanitizers)
+        env:
+          LSAN_OPTIONS: suppressions=ci/lsan.supp
+        run: xvfb-run -a ./build-sanitize/Mineclone --soak-test --no-gl-debug
 
       - name: Interaction Test (Sanitizers)
         env:
