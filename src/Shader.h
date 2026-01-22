@@ -16,6 +16,7 @@ public:
     Shader& operator=(const Shader&) = delete;
 
     bool loadFromFiles(const std::string& vertexPath, const std::string& fragmentPath, std::string& errorOut);
+    void Destroy();
     void use() const;
     void setMat4(const std::string& name, const glm::mat4& value) const;
     void setVec3(const std::string& name, const glm::vec3& value) const;

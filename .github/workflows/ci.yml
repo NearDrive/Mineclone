@@ -14,7 +14,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xorg-dev libgl1-mesa-dev xvfb
+          sudo apt-get install -y xorg-dev libgl1-mesa-dev xvfb gdb
 
       - name: Configure Release
         run: cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
@@ -30,6 +30,39 @@ jobs:
 
       - name: Smoke Test (Debug)
         run: xvfb-run -a ./build-debug/Mineclone --smoke-test --no-gl-debug
+
+      - name: Render Test (Debug)
+        run: |
+          ulimit -c unlimited
+          set +e
+          xvfb-run -a ./build-debug/Mineclone --render-test --render-test-out render_test.png --render-test-size 256 256 --render-test-frames 3 --render-test-seed 1337 --no-gl-debug > render_test.log 2>&1
+          status=$?
+          cat render_test.log
+          exit $status
+
+      - name: Upload Render Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-test-logs
+          path: |
+            render_test.log
+            core*
+
+      - name: Upload Render Test Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-test-linux
+          path: render_test.png
+
+      - name: Render Test (Debug) Backtrace
+        if: always()
+        continue-on-error: true
+        run: |
+          ls -al core* || true
+          xvfb-run -a gdb --batch -ex "set pagination off" -ex "run" -ex "bt full" \
+            --args ./build-debug/Mineclone --render-test --render-test-out render_test.png --render-test-size 256 256 --render-test-frames 3 --render-test-seed 1337 --no-gl-debug
 
   linux-sanitize:
     runs-on: ubuntu-latest

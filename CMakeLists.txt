@@ -55,6 +55,8 @@ add_executable(Mineclone
   src/core/ThreadSafeQueue.h
   src/core/Profiler.cpp
   src/core/Profiler.h
+  src/core/Sha256.cpp
+  src/core/Sha256.h
   src/core/Verify.cpp
   src/core/Verify.h
   src/core/WorkerPool.cpp
@@ -70,6 +72,8 @@ add_executable(Mineclone
   src/physics/VoxelCollision.h
   src/renderer/DebugDraw.cpp
   src/renderer/DebugDraw.h
+  src/renderer/RenderTest.cpp
+  src/renderer/RenderTest.h
   src/voxel/BlockId.h
   src/voxel/BlockFaces.h
   src/voxel/BlockEdit.cpp
@@ -98,6 +102,7 @@ add_executable(Mineclone
 
 target_include_directories(Mineclone PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
 )
 
 target_compile_definitions(Mineclone PRIVATE GLFW_INCLUDE_NONE)
