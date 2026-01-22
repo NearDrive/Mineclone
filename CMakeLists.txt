@@ -59,6 +59,8 @@ add_executable(Mineclone
   src/core/Sha256.h
   src/core/Verify.cpp
   src/core/Verify.h
+  src/core/WorldTest.cpp
+  src/core/WorldTest.h
   src/core/WorkerPool.cpp
   src/core/WorkerPool.h
   src/math/Frustum.cpp

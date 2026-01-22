@@ -31,6 +31,9 @@ jobs:
       - name: Smoke Test (Debug)
         run: xvfb-run -a ./build-debug/Mineclone --smoke-test --no-gl-debug
 
+      - name: World Test (Debug)
+        run: ./build-debug/Mineclone --world-test
+
       - name: Render Test (Debug)
         run: |
           ulimit -c unlimited
