@@ -50,6 +50,8 @@ bool ParseCli(int argc, char** argv, CliOptions& options, std::string& error) {
         std::string arg = argv[i];
         if (arg == "--smoke-test") {
             options.smokeTest = true;
+        } else if (arg == "--interaction-test") {
+            options.interactionTest = true;
         } else if (arg == "--world-test") {
             options.worldTest = true;
         } else if (arg == "--render-test") {
@@ -119,6 +121,8 @@ std::string Usage(const char* argv0) {
     out << "Usage: " << (argv0 ? argv0 : "Mineclone") << " [options]\n"
         << "Options:\n"
         << "  --smoke-test     Run deterministic smoke test and exit.\n"
+        << "  --interaction-test\n"
+        << "                  Run deterministic interaction smoke test and exit.\n"
         << "  --world-test     Run deterministic world logic test and exit.\n"
         << "  --render-test    Run deterministic offscreen render test and exit.\n"
         << "  --render-test-out <path>\n"

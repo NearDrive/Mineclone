@@ -55,6 +55,12 @@ jobs:
       - name: Smoke Test (Debug)
         run: xvfb-run -a ./build-debug/Mineclone --smoke-test --no-gl-debug
 
+      - name: Interaction Test (Debug)
+        run: |
+          set -e
+          set -o pipefail
+          xvfb-run -a ./build-debug/Mineclone --interaction-test --no-gl-debug | tee interaction_test_log.txt
+
       - name: World Test (Debug)
         run: ./build-debug/Mineclone --world-test
 
@@ -75,6 +81,13 @@ jobs:
           path: |
             render_test.log
             core*
+
+      - name: Upload Interaction Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interaction-test-logs
+          path: interaction_test_log.txt
 
       - name: Upload Render Test Images
         if: always()
@@ -124,6 +137,14 @@ jobs:
         env:
           LSAN_OPTIONS: suppressions=ci/lsan.supp
         run: xvfb-run -a ./build-sanitize/Mineclone --smoke-test --no-gl-debug
+
+      - name: Interaction Test (Sanitizers)
+        env:
+          LSAN_OPTIONS: suppressions=ci/lsan.supp
+        run: |
+          set -e
+          set -o pipefail
+          xvfb-run -a ./build-sanitize/Mineclone --interaction-test --no-gl-debug | tee interaction_test_sanitize_log.txt
 
   windows:
     runs-on: windows-latest
