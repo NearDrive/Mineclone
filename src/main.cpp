@@ -201,7 +201,8 @@ void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severi
 
 struct InteractionRaycastStep {
     int frame = 0;
-    glm::ivec3 offset{0};
+    glm::vec3 cameraPosition{0.0f};
+    glm::ivec3 targetBlock{0};
     voxel::BlockId blockId = voxel::kBlockAir;
 };
 
@@ -481,9 +482,9 @@ int main(int argc, char** argv) {
         voxel::ChunkCoord playerChunk{0, 0, 0};
 
         const std::array<InteractionRaycastStep, 3> kInteractionRaycasts = {{
-            {30, {3, 0, 0}, voxel::kBlockStone},
-            {120, {0, 0, 3}, voxel::kBlockStone},
-            {200, {-3, 0, -3}, voxel::kBlockStone},
+            {30, {2.5f, 9.6f, 2.5f}, {2, 7, 2}, voxel::kBlockStone},
+            {120, {31.5f, 9.6f, 2.5f}, {31, 7, 2}, voxel::kBlockStone},
+            {200, {32.5f, 9.6f, -1.5f}, {32, 7, -2}, voxel::kBlockStone},
         }};
 
         const std::array<InteractionEditStep, 4> kInteractionEdits = {{
@@ -688,22 +689,15 @@ int main(int argc, char** argv) {
             if (interactionTest && interactionRaycastIndex < kInteractionRaycasts.size() &&
                 interactionFrameIndex == kInteractionRaycasts[interactionRaycastIndex].frame) {
                 const InteractionRaycastStep& step = kInteractionRaycasts[interactionRaycastIndex];
-                const glm::vec3 cameraPosition = gCamera.getPosition();
-                const glm::vec3 targetCenter =
-                    cameraPosition +
-                    glm::vec3(static_cast<float>(step.offset.x),
-                              static_cast<float>(step.offset.y),
-                              static_cast<float>(step.offset.z));
-                const glm::ivec3 targetBlock{
-                    static_cast<int>(std::floor(targetCenter.x)),
-                    static_cast<int>(std::floor(targetCenter.y)),
-                    static_cast<int>(std::floor(targetCenter.z))};
-                voxel::WorldBlockCoord worldTarget{targetBlock.x, targetBlock.y, targetBlock.z};
+                player.SetPosition(step.cameraPosition - kEyeOffset);
+                player.ResetVelocity();
+                gCamera.setPosition(step.cameraPosition);
+                voxel::WorldBlockCoord worldTarget{step.targetBlock.x, step.targetBlock.y, step.targetBlock.z};
                 voxel::ChunkCoord chunkCoord = voxel::WorldToChunkCoord(worldTarget, voxel::kChunkSize);
                 EnsureChunkReady(chunkRegistry, chunkCoord);
                 chunkRegistry.SetBlock(worldTarget, step.blockId);
                 const glm::vec2 yawPitch = YawPitchFromDirection(
-                    glm::vec3(targetBlock) + glm::vec3(0.5f) - cameraPosition);
+                    glm::vec3(step.targetBlock) + glm::vec3(0.5f) - step.cameraPosition);
                 SetCameraAngles(gCamera, yawPitch.x, yawPitch.y);
             }
 
@@ -817,29 +811,19 @@ int main(int argc, char** argv) {
                     interactionFrameIndex == kInteractionRaycasts[interactionRaycastIndex].frame) {
                     const InteractionRaycastStep& step = kInteractionRaycasts[interactionRaycastIndex];
                     ++interactionState.raycasts;
-                    const glm::vec3 cameraPosition = gCamera.getPosition();
-                    const glm::vec3 targetCenter =
-                        cameraPosition +
-                        glm::vec3(static_cast<float>(step.offset.x),
-                                  static_cast<float>(step.offset.y),
-                                  static_cast<float>(step.offset.z));
-                    const glm::ivec3 targetBlock{
-                        static_cast<int>(std::floor(targetCenter.x)),
-                        static_cast<int>(std::floor(targetCenter.y)),
-                        static_cast<int>(std::floor(targetCenter.z))};
-                    voxel::WorldBlockCoord worldTarget{targetBlock.x, targetBlock.y, targetBlock.z};
+                    voxel::WorldBlockCoord worldTarget{step.targetBlock.x, step.targetBlock.y, step.targetBlock.z};
                     voxel::ChunkCoord expectedChunk = voxel::WorldToChunkCoord(worldTarget, voxel::kChunkSize);
                     if (!IsChunkReady(chunkRegistry, expectedChunk)) {
                         interactionState.failed = true;
                         interactionState.failureMessage = "[InteractionTest] Raycast chunk not ready.";
-                    } else if (!currentHit.hit || currentHit.block != targetBlock) {
+                    } else if (!currentHit.hit || currentHit.block != step.targetBlock) {
                         interactionState.failed = true;
                         std::ostringstream message;
                         message << "[InteractionTest] Raycast mismatch at frame " << step.frame
                                 << ": hit=" << currentHit.hit
                                 << " block=(" << currentHit.block.x << ", " << currentHit.block.y << ", "
-                                << currentHit.block.z << ") expected=(" << targetBlock.x << ", "
-                                << targetBlock.y << ", " << targetBlock.z << ")";
+                                << currentHit.block.z << ") expected=(" << step.targetBlock.x << ", "
+                                << step.targetBlock.y << ", " << step.targetBlock.z << ")";
                         interactionState.failureMessage = message.str();
                     } else {
                         voxel::BlockId id = chunkRegistry.GetBlockOrAir(worldTarget);
