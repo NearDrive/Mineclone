@@ -6,16 +6,20 @@
 
 #include <algorithm>
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <csignal>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <shared_mutex>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #if defined(__linux__)
 #include <execinfo.h>
@@ -27,6 +31,7 @@
 #include "core/Assert.h"
 #include "core/Cli.h"
 #include "core/Profiler.h"
+#include "core/Sha256.h"
 #include "core/Verify.h"
 #include "core/WorldTest.h"
 #include "core/WorkerPool.h"
@@ -62,6 +67,13 @@ constexpr int kSmokeTestFrames = 60;
 constexpr int kSmokeEditTimeoutMs = 1000;
 constexpr int kSmokeMaxDurationMs = 1000;
 constexpr float kSmokeDeltaTime = 1.0f / 60.0f;
+constexpr int kInteractionTestFrames = 240;
+constexpr std::uint32_t kInteractionTestSeed = 1337;
+constexpr float kInteractionDeltaTime = 1.0f / 60.0f;
+constexpr int kInteractionRenderRadius = 3;
+constexpr int kInteractionLoadRadius = 4;
+constexpr int kInteractionWorkerThreads = 1;
+const glm::vec3 kInteractionMoveDir(-2.0f, 0.0f, -2.0f);
 const glm::vec3 kPlayerSpawn(0.0f, 20.0f, 0.0f);
 const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
 
@@ -109,6 +121,67 @@ void setMouseCapture(GLFWwindow* window, bool capture) {
     }
 }
 
+void SetCameraAngles(Camera& camera, float yaw, float pitch) {
+    const float yawDelta = yaw - camera.getYaw();
+    const float pitchDelta = pitch - camera.getPitch();
+    camera.processMouseMovement(yawDelta, pitchDelta, true);
+}
+
+void AppendInt32(std::vector<std::uint8_t>& buffer, std::int32_t value) {
+    buffer.push_back(static_cast<std::uint8_t>(value & 0xFF));
+    buffer.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFF));
+    buffer.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFF));
+    buffer.push_back(static_cast<std::uint8_t>((value >> 24) & 0xFF));
+}
+
+void AppendUint32(std::vector<std::uint8_t>& buffer, std::uint32_t value) {
+    buffer.push_back(static_cast<std::uint8_t>(value & 0xFF));
+    buffer.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFF));
+    buffer.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFF));
+    buffer.push_back(static_cast<std::uint8_t>((value >> 24) & 0xFF));
+}
+
+void AppendUint16(std::vector<std::uint8_t>& buffer, std::uint16_t value) {
+    buffer.push_back(static_cast<std::uint8_t>(value & 0xFF));
+    buffer.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFF));
+}
+
+void AppendFloat(std::vector<std::uint8_t>& buffer, float value) {
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    AppendUint32(buffer, bits);
+}
+
+bool IsChunkReady(const voxel::ChunkRegistry& registry, const voxel::ChunkCoord& coord) {
+    auto entry = registry.TryGetEntry(coord);
+    if (!entry) {
+        return false;
+    }
+    if (entry->generationState.load(std::memory_order_acquire) != voxel::GenerationState::Ready) {
+        return false;
+    }
+    std::shared_lock<std::shared_mutex> lock(entry->dataMutex);
+    return entry->chunk != nullptr;
+}
+
+void EnsureChunkReady(voxel::ChunkRegistry& registry, const voxel::ChunkCoord& coord) {
+    auto entry = registry.GetOrCreateEntry(coord);
+    std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
+    if (!entry->chunk) {
+        entry->chunk = std::make_unique<voxel::Chunk>();
+        voxel::ChunkRegistry::GenerateChunkData(coord, *entry->chunk);
+    }
+    entry->generationState.store(voxel::GenerationState::Ready, std::memory_order_release);
+    entry->dirty.store(false, std::memory_order_release);
+}
+
+glm::vec2 YawPitchFromDirection(const glm::vec3& direction) {
+    glm::vec3 dir = glm::normalize(direction);
+    const float yaw = glm::degrees(std::atan2(dir.z, dir.x));
+    const float pitch = glm::degrees(std::asin(dir.y));
+    return {yaw, pitch};
+}
+
 #ifndef NDEBUG
 void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severity,
                             GLsizei length, const GLchar* message, const void* userParam) {
@@ -125,6 +198,30 @@ void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severi
     std::cerr << "[OpenGL] " << message << '\n';
 }
 #endif
+
+struct InteractionRaycastStep {
+    int frame = 0;
+    glm::vec3 cameraPosition{0.0f};
+    glm::ivec3 targetBlock{0};
+    voxel::BlockId blockId = voxel::kBlockAir;
+};
+
+struct InteractionEditStep {
+    int frame = 0;
+    voxel::WorldBlockCoord coord{0, 0, 0};
+    voxel::BlockId blockId = voxel::kBlockAir;
+    voxel::BlockId expectedId = voxel::kBlockAir;
+};
+
+struct InteractionTestState {
+    bool failed = false;
+    std::string failureMessage;
+    int frames = 0;
+    int edits = 0;
+    int raycasts = 0;
+    voxel::ChunkStreamingStats stats;
+    std::string checksum;
+};
 
 #if defined(__linux__)
 void CrashHandler(int signal) {
@@ -161,6 +258,7 @@ int main(int argc, char** argv) {
     }
 
     const bool smokeTest = options.smokeTest;
+    const bool interactionTest = options.interactionTest;
     const bool renderTest = options.renderTest;
     if (renderTest) {
         renderer::RenderTestOptions renderOptions;
@@ -185,7 +283,7 @@ int main(int argc, char** argv) {
         }
         return EXIT_SUCCESS;
     }
-    const bool allowInput = !smokeTest;
+    const bool allowInput = !(smokeTest || interactionTest);
 #ifndef NDEBUG
     const bool enableGlDebug = !options.noGlDebug;
 #endif
@@ -193,7 +291,7 @@ int main(int argc, char** argv) {
 #ifndef NDEBUG
     const bool shouldRunVerify = true;
 #else
-    const bool shouldRunVerify = smokeTest;
+    const bool shouldRunVerify = smokeTest || interactionTest;
 #endif
 
     if (shouldRunVerify) {
@@ -266,9 +364,14 @@ int main(int argc, char** argv) {
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
-    setMouseCapture(window, allowInput);
+    setMouseCapture(window, allowInput || interactionTest);
+    if (interactionTest) {
+        gCamera.setMouseSensitivity(1.0f);
+        SetCameraAngles(gCamera, -135.0f, -89.0f);
+    }
 
     bool smokeFailed = false;
+    InteractionTestState interactionState;
     {
         Shader shader;
         std::string shaderError;
@@ -295,12 +398,13 @@ int main(int argc, char** argv) {
         chunkRegistry.SetStorage(&chunkStorage);
 
         voxel::ChunkStreamingConfig streamingConfig;
-        streamingConfig.renderRadius = kRenderRadiusDefault;
-        streamingConfig.loadRadius = kLoadRadiusDefault;
+        streamingConfig.renderRadius = interactionTest ? kInteractionRenderRadius : kRenderRadiusDefault;
+        streamingConfig.loadRadius = interactionTest ? kInteractionLoadRadius : kLoadRadiusDefault;
         streamingConfig.maxChunkCreatesPerFrame = 3;
         streamingConfig.maxChunkMeshesPerFrame = 2;
         streamingConfig.maxGpuUploadsPerFrame = 3;
-        streamingConfig.workerThreads = smokeTest ? 0 : 2;
+        streamingConfig.workerThreads =
+            interactionTest ? kInteractionWorkerThreads : (smokeTest ? 0 : 2);
 
         voxel::ChunkStreaming streaming(streamingConfig);
         streaming.SetStorage(&chunkStorage);
@@ -365,6 +469,9 @@ int main(int argc, char** argv) {
         bool smokeEditSucceeded = false;
         int smokeFrames = 0;
         bool smokeChunkEnsured = false;
+        std::size_t interactionRaycastIndex = 0;
+        std::size_t interactionEditIndex = 0;
+        int interactionFrameIndex = 0;
         auto lastClampLogTime = lastTime - std::chrono::seconds(1);
         game::Player player(kPlayerSpawn);
         glm::mat4 projection(1.0f);
@@ -374,11 +481,27 @@ int main(int argc, char** argv) {
         glm::vec3 playerPosition = player.Position();
         voxel::ChunkCoord playerChunk{0, 0, 0};
 
+        const std::array<InteractionRaycastStep, 3> kInteractionRaycasts = {{
+            {30, {2.5f, 9.6f, 2.5f}, {2, 7, 2}, voxel::kBlockStone},
+            {120, {31.5f, 9.6f, 2.5f}, {31, 7, 2}, voxel::kBlockStone},
+            {200, {32.5f, 9.6f, -1.5f}, {32, 7, -2}, voxel::kBlockStone},
+        }};
+
+        const std::array<InteractionEditStep, 4> kInteractionEdits = {{
+            {40, {voxel::kChunkSize - 1, 7, 0}, voxel::kBlockStone, voxel::kBlockStone},
+            {80, {voxel::kChunkSize, 7, 0}, voxel::kBlockStone, voxel::kBlockStone},
+            {160, {voxel::kChunkSize - 1, 7, 0}, voxel::kBlockDirt, voxel::kBlockDirt},
+            {200, {voxel::kChunkSize, 7, 0}, voxel::kBlockDirt, voxel::kBlockDirt},
+        }};
+
     while (!glfwWindowShouldClose(window)) {
         core::ScopedTimer frameTimer(&profiler, core::Metric::Frame);
         auto now = std::chrono::steady_clock::now();
         float deltaTime = kSmokeDeltaTime;
-        if (!smokeTest) {
+        if (interactionTest) {
+            deltaTime = kInteractionDeltaTime;
+        }
+        if (!smokeTest && !interactionTest) {
             std::chrono::duration<float> delta = now - lastTime;
             deltaTime = delta.count();
             if (deltaTime > kMaxDeltaTime) {
@@ -397,7 +520,9 @@ int main(int argc, char** argv) {
             core::ScopedTimer updateTimer(&profiler, core::Metric::Update);
 
             bool jumpPressed = false;
-            if (allowInput) {
+            if (interactionTest) {
+                desiredDir = kInteractionMoveDir;
+            } else if (allowInput) {
                 int escState = glfwGetKey(window, GLFW_KEY_ESCAPE);
                 if (escState == GLFW_PRESS && !escPressed) {
                     escPressed = true;
@@ -561,6 +686,21 @@ int main(int argc, char** argv) {
             glfwGetFramebufferSize(window, &width, &height);
             float aspect = width > 0 && height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 
+            if (interactionTest && interactionRaycastIndex < kInteractionRaycasts.size() &&
+                interactionFrameIndex == kInteractionRaycasts[interactionRaycastIndex].frame) {
+                const InteractionRaycastStep& step = kInteractionRaycasts[interactionRaycastIndex];
+                player.SetPosition(step.cameraPosition - kEyeOffset);
+                player.ResetVelocity();
+                gCamera.setPosition(step.cameraPosition);
+                voxel::WorldBlockCoord worldTarget{step.targetBlock.x, step.targetBlock.y, step.targetBlock.z};
+                voxel::ChunkCoord chunkCoord = voxel::WorldToChunkCoord(worldTarget, voxel::kChunkSize);
+                EnsureChunkReady(chunkRegistry, chunkCoord);
+                chunkRegistry.SetBlock(worldTarget, step.blockId);
+                const glm::vec2 yawPitch = YawPitchFromDirection(
+                    glm::vec3(step.targetBlock) + glm::vec3(0.5f) - step.cameraPosition);
+                SetCameraAngles(gCamera, yawPitch.x, yawPitch.y);
+            }
+
             projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 500.0f);
             view = gCamera.getViewMatrix();
             frustum = Frustum::FromMatrix(projection * view);
@@ -569,7 +709,7 @@ int main(int argc, char** argv) {
             currentHit = {};
             hasTarget = false;
             debugDraw.Clear();
-            if (gMouseCaptured) {
+            if (gMouseCaptured || interactionTest) {
                 currentHit = voxel::RaycastBlocks(chunkRegistry, gCamera.getPosition(), gCamera.getFront(),
                                                   kReachDistance);
                 if (currentHit.hit) {
@@ -621,6 +761,7 @@ int main(int argc, char** argv) {
                 static_cast<int>(std::floor(playerPosition.z))};
             playerChunk = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
             streaming.Tick(playerChunk, chunkRegistry, mesher);
+            workerPool.NotifyWork();
 
             if (smokeTest && !smokeEditRequested) {
                 voxel::WorldBlockCoord target{voxel::kChunkSize - 1, 1, 0};
@@ -664,9 +805,71 @@ int main(int argc, char** argv) {
                     smokeFailed = true;
                 }
             }
+
+            if (interactionTest && !interactionState.failed) {
+                if (interactionRaycastIndex < kInteractionRaycasts.size() &&
+                    interactionFrameIndex == kInteractionRaycasts[interactionRaycastIndex].frame) {
+                    const InteractionRaycastStep& step = kInteractionRaycasts[interactionRaycastIndex];
+                    ++interactionState.raycasts;
+                    voxel::WorldBlockCoord worldTarget{step.targetBlock.x, step.targetBlock.y, step.targetBlock.z};
+                    voxel::ChunkCoord expectedChunk = voxel::WorldToChunkCoord(worldTarget, voxel::kChunkSize);
+                    if (!IsChunkReady(chunkRegistry, expectedChunk)) {
+                        interactionState.failed = true;
+                        interactionState.failureMessage = "[InteractionTest] Raycast chunk not ready.";
+                    } else if (!currentHit.hit || currentHit.block != step.targetBlock) {
+                        interactionState.failed = true;
+                        std::ostringstream message;
+                        message << "[InteractionTest] Raycast mismatch at frame " << step.frame
+                                << ": hit=" << currentHit.hit
+                                << " block=(" << currentHit.block.x << ", " << currentHit.block.y << ", "
+                                << currentHit.block.z << ") expected=(" << step.targetBlock.x << ", "
+                                << step.targetBlock.y << ", " << step.targetBlock.z << ")";
+                        interactionState.failureMessage = message.str();
+                    } else {
+                        voxel::BlockId id = chunkRegistry.GetBlockOrAir(worldTarget);
+                        if (id != step.blockId) {
+                            interactionState.failed = true;
+                            std::ostringstream message;
+                            message << "[InteractionTest] Raycast block id mismatch at frame "
+                                    << step.frame << ": got=" << static_cast<int>(id)
+                                    << " expected=" << static_cast<int>(step.blockId);
+                            interactionState.failureMessage = message.str();
+                        }
+                    }
+                    ++interactionRaycastIndex;
+                }
+
+                if (interactionEditIndex < kInteractionEdits.size() &&
+                    interactionFrameIndex == kInteractionEdits[interactionEditIndex].frame) {
+                    const InteractionEditStep& step = kInteractionEdits[interactionEditIndex];
+                    voxel::ChunkCoord chunkCoord = voxel::WorldToChunkCoord(step.coord, voxel::kChunkSize);
+                    EnsureChunkReady(chunkRegistry, chunkCoord);
+                    bool edited = voxel::TrySetBlock(chunkRegistry, streaming, step.coord, step.blockId);
+                    ++interactionState.edits;
+                    if (!edited) {
+                        interactionState.failed = true;
+                        interactionState.failureMessage = "[InteractionTest] SetBlock failed.";
+                    } else {
+                        voxel::BlockId updated = chunkRegistry.GetBlockOrAir(step.coord);
+                        if (updated != step.expectedId) {
+                            interactionState.failed = true;
+                            std::ostringstream message;
+                            message << "[InteractionTest] GetBlockOrAir mismatch at frame " << step.frame
+                                    << ": got=" << static_cast<int>(updated)
+                                    << " expected=" << static_cast<int>(step.expectedId);
+                            interactionState.failureMessage = message.str();
+                        }
+                    }
+                    ++interactionEditIndex;
+                }
+            }
         }
 
-        if (smokeTest && smokeFailed) {
+        if (interactionTest && interactionState.failed) {
+            interactionState.frames = interactionFrameIndex + 1;
+            interactionState.stats = streaming.Stats();
+        }
+        if ((smokeTest && smokeFailed) || (interactionTest && interactionState.failed)) {
             break;
         }
 
@@ -754,8 +957,17 @@ int main(int argc, char** argv) {
                 break;
             }
         }
+        if (interactionTest) {
+            interactionState.frames = interactionFrameIndex + 1;
+            interactionState.stats = streaming.Stats();
+            if (interactionFrameIndex + 1 >= kInteractionTestFrames) {
+                std::cout << "[InteractionTest] Completed " << interactionState.frames << " frames.\n";
+                break;
+            }
+            ++interactionFrameIndex;
+        }
         std::chrono::duration<float> fpsElapsed = now - fpsTimer;
-        if (fpsElapsed.count() >= 0.25f) {
+        if (!interactionTest && fpsElapsed.count() >= 0.25f) {
             float fps = static_cast<float>(frames) / fpsElapsed.count();
             auto round1 = [](float value) { return std::round(value * 10.0f) / 10.0f; };
             std::ostringstream title;
@@ -821,6 +1033,63 @@ int main(int argc, char** argv) {
         }
     }
 
+        if (interactionTest) {
+            std::vector<std::uint8_t> checksumBuffer;
+            checksumBuffer.reserve(256);
+            AppendUint32(checksumBuffer, kInteractionTestSeed);
+            AppendInt32(checksumBuffer, interactionState.frames);
+            AppendInt32(checksumBuffer, interactionState.edits);
+            AppendInt32(checksumBuffer, interactionState.raycasts);
+            AppendFloat(checksumBuffer, player.Position().x);
+            AppendFloat(checksumBuffer, player.Position().y);
+            AppendFloat(checksumBuffer, player.Position().z);
+            AppendFloat(checksumBuffer, gCamera.getPosition().x);
+            AppendFloat(checksumBuffer, gCamera.getPosition().y);
+            AppendFloat(checksumBuffer, gCamera.getPosition().z);
+            AppendFloat(checksumBuffer, gCamera.getYaw());
+            AppendFloat(checksumBuffer, gCamera.getPitch());
+
+            const std::array<voxel::WorldBlockCoord, 5> samples = {{
+                {0, 7, 0},
+                {voxel::kChunkSize - 1, 7, 0},
+                {voxel::kChunkSize, 7, 0},
+                {-1, 7, -1},
+                {-33, 7, -33},
+            }};
+            for (const auto& sample : samples) {
+                AppendInt32(checksumBuffer, sample.x);
+                AppendInt32(checksumBuffer, sample.y);
+                AppendInt32(checksumBuffer, sample.z);
+                AppendUint16(checksumBuffer, chunkRegistry.GetBlockOrAir(sample));
+            }
+            AppendUint32(checksumBuffer, static_cast<std::uint32_t>(interactionState.stats.generatedChunksReady));
+            AppendUint32(checksumBuffer, static_cast<std::uint32_t>(interactionState.stats.meshedCpuReady));
+            AppendUint32(checksumBuffer, static_cast<std::uint32_t>(interactionState.stats.gpuReadyChunks));
+
+            interactionState.checksum = core::Sha256Hex(checksumBuffer);
+
+            const std::size_t valueWidth = 42;
+            std::cout << "+----------------------+------------------------------------------+\n";
+            std::cout << "| Metric               | Value                                    |\n";
+            std::cout << "+----------------------+------------------------------------------+\n";
+            std::cout << "| seed                 | " << std::left << std::setw(valueWidth) << kInteractionTestSeed
+                      << "|\n";
+            std::cout << "| frames               | " << std::left << std::setw(valueWidth) << interactionState.frames
+                      << "|\n";
+            std::cout << "| edits                | " << std::left << std::setw(valueWidth) << interactionState.edits << "|\n";
+            std::cout << "| raycasts             | " << std::left << std::setw(valueWidth) << interactionState.raycasts
+                      << "|\n";
+            std::cout << "| chunks_generated     | " << std::left << std::setw(valueWidth)
+                      << interactionState.stats.generatedChunksReady << "|\n";
+            std::cout << "| chunks_meshed        | " << std::left << std::setw(valueWidth)
+                      << interactionState.stats.meshedCpuReady << "|\n";
+            std::cout << "| chunks_uploaded      | " << std::left << std::setw(valueWidth)
+                      << interactionState.stats.gpuReadyChunks << "|\n";
+            std::cout << "| final_checksum_sha256| " << std::left << std::setw(valueWidth)
+                      << interactionState.checksum << "|\n";
+            std::cout << "+----------------------+------------------------------------------+\n";
+        }
+
         workerPool.Stop();
         chunkRegistry.SaveAllDirty(chunkStorage);
         chunkRegistry.DestroyAll();
@@ -829,6 +1098,10 @@ int main(int argc, char** argv) {
     glfwDestroyWindow(window);
     glfwTerminate();
     if (smokeTest && smokeFailed) {
+        return EXIT_FAILURE;
+    }
+    if (interactionTest && interactionState.failed) {
+        std::cerr << interactionState.failureMessage << '\n';
         return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;

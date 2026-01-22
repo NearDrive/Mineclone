@@ -7,6 +7,7 @@ namespace core {
 
 struct CliOptions {
     bool smokeTest = false;
+    bool interactionTest = false;
     bool worldTest = false;
     bool noGlDebug = false;
     bool help = false;
