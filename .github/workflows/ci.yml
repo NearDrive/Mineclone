@@ -17,19 +17,46 @@ jobs:
           sudo apt-get install -y xorg-dev libgl1-mesa-dev xvfb gdb
 
       - name: Configure Release
-        run: cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+        run: |
+          success=0
+          for attempt in 1 2 3; do
+            if cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release; then
+              success=1
+              break
+            fi
+            echo "Configure Release failed (attempt ${attempt}). Retrying..." >&2
+            sleep 5
+          done
+          if [ "$success" -ne 1 ]; then
+            exit 1
+          fi
 
       - name: Build Release
         run: cmake --build build-release --config Release
 
       - name: Configure Debug
-        run: cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
+        run: |
+          success=0
+          for attempt in 1 2 3; do
+            if cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug; then
+              success=1
+              break
+            fi
+            echo "Configure Debug failed (attempt ${attempt}). Retrying..." >&2
+            sleep 5
+          done
+          if [ "$success" -ne 1 ]; then
+            exit 1
+          fi
 
       - name: Build Debug
         run: cmake --build build-debug --config Debug
 
       - name: Smoke Test (Debug)
         run: xvfb-run -a ./build-debug/Mineclone --smoke-test --no-gl-debug
+
+      - name: World Test (Debug)
+        run: ./build-debug/Mineclone --world-test
 
       - name: Render Test (Debug)
         run: |
@@ -76,7 +103,19 @@ jobs:
           sudo apt-get install -y xorg-dev libgl1-mesa-dev xvfb
 
       - name: Configure Sanitizers
-        run: cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DMINECLONE_SANITIZE=ON
+        run: |
+          success=0
+          for attempt in 1 2 3; do
+            if cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DMINECLONE_SANITIZE=ON; then
+              success=1
+              break
+            fi
+            echo "Configure Sanitizers failed (attempt ${attempt}). Retrying..." >&2
+            sleep 5
+          done
+          if [ "$success" -ne 1 ]; then
+            exit 1
+          fi
 
       - name: Build Sanitizers
         run: cmake --build build-sanitize --config Debug

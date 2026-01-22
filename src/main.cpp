@@ -28,6 +28,7 @@
 #include "core/Cli.h"
 #include "core/Profiler.h"
 #include "core/Verify.h"
+#include "core/WorldTest.h"
 #include "core/WorkerPool.h"
 #include "game/Player.h"
 #include "math/Frustum.h"
@@ -175,6 +176,14 @@ int main(int argc, char** argv) {
         renderOptions.enableGlDebug = !options.noGlDebug;
 #endif
         return renderer::RunRenderTest(renderOptions);
+    }
+    if (options.worldTest) {
+        core::WorldTestResult result = core::RunWorldTest();
+        if (!result.ok) {
+            std::cerr << "[WorldTest] Failed: " << result.message << '\n';
+            return EXIT_FAILURE;
+        }
+        return EXIT_SUCCESS;
     }
     const bool allowInput = !smokeTest;
 #ifndef NDEBUG
