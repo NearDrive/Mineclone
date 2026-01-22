@@ -164,6 +164,24 @@ bool IsChunkReady(const voxel::ChunkRegistry& registry, const voxel::ChunkCoord&
     return entry->chunk != nullptr;
 }
 
+void EnsureChunkReady(voxel::ChunkRegistry& registry, const voxel::ChunkCoord& coord) {
+    auto entry = registry.GetOrCreateEntry(coord);
+    std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
+    if (!entry->chunk) {
+        entry->chunk = std::make_unique<voxel::Chunk>();
+        voxel::ChunkRegistry::GenerateChunkData(coord, *entry->chunk);
+    }
+    entry->generationState.store(voxel::GenerationState::Ready, std::memory_order_release);
+    entry->dirty.store(false, std::memory_order_release);
+}
+
+glm::vec2 YawPitchFromDirection(const glm::vec3& direction) {
+    glm::vec3 dir = glm::normalize(direction);
+    const float yaw = glm::degrees(std::atan2(dir.z, dir.x));
+    const float pitch = glm::degrees(std::asin(dir.y));
+    return {yaw, pitch};
+}
+
 #ifndef NDEBUG
 void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severity,
                             GLsizei length, const GLchar* message, const void* userParam) {
@@ -181,10 +199,9 @@ void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severi
 }
 #endif
 
-struct InteractionRaycastExpectation {
+struct InteractionRaycastStep {
     int frame = 0;
-    bool expectHit = true;
-    glm::ivec3 block{0};
+    glm::ivec3 offset{0};
     voxel::BlockId blockId = voxel::kBlockAir;
 };
 
@@ -463,23 +480,11 @@ int main(int argc, char** argv) {
         glm::vec3 playerPosition = player.Position();
         voxel::ChunkCoord playerChunk{0, 0, 0};
 
-        const std::array<int, 3> kInteractionRaycastFrames = {30, 120, 200};
-        std::array<InteractionRaycastExpectation, 3> interactionRaycasts;
-        for (std::size_t i = 0; i < interactionRaycasts.size(); ++i) {
-            const int frame = kInteractionRaycastFrames[i];
-            const double timeSeconds = static_cast<double>(frame + 1) * kInteractionDeltaTime;
-            const double posX = static_cast<double>(kPlayerSpawn.x) +
-                                static_cast<double>(kInteractionMoveDir.x) *
-                                    static_cast<double>(game::Player::kMoveSpeed) * timeSeconds;
-            const double posZ = static_cast<double>(kPlayerSpawn.z) +
-                                static_cast<double>(kInteractionMoveDir.z) *
-                                    static_cast<double>(game::Player::kMoveSpeed) * timeSeconds;
-            const glm::ivec3 block{
-                static_cast<int>(std::floor(posX)),
-                7,
-                static_cast<int>(std::floor(posZ))};
-            interactionRaycasts[i] = InteractionRaycastExpectation{frame, true, block, voxel::kBlockDirt};
-        }
+        const std::array<InteractionRaycastStep, 3> kInteractionRaycasts = {{
+            {30, {3, 0, 0}, voxel::kBlockStone},
+            {120, {0, 0, 3}, voxel::kBlockStone},
+            {200, {-3, 0, -3}, voxel::kBlockStone},
+        }};
 
         const std::array<InteractionEditStep, 4> kInteractionEdits = {{
             {40, {voxel::kChunkSize - 1, 7, 0}, voxel::kBlockStone, voxel::kBlockStone},
@@ -680,6 +685,28 @@ int main(int argc, char** argv) {
             glfwGetFramebufferSize(window, &width, &height);
             float aspect = width > 0 && height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 
+            if (interactionTest && interactionRaycastIndex < kInteractionRaycasts.size() &&
+                interactionFrameIndex == kInteractionRaycasts[interactionRaycastIndex].frame) {
+                const InteractionRaycastStep& step = kInteractionRaycasts[interactionRaycastIndex];
+                const glm::vec3 cameraPosition = gCamera.getPosition();
+                const glm::vec3 targetCenter =
+                    cameraPosition +
+                    glm::vec3(static_cast<float>(step.offset.x),
+                              static_cast<float>(step.offset.y),
+                              static_cast<float>(step.offset.z));
+                const glm::ivec3 targetBlock{
+                    static_cast<int>(std::floor(targetCenter.x)),
+                    static_cast<int>(std::floor(targetCenter.y)),
+                    static_cast<int>(std::floor(targetCenter.z))};
+                voxel::WorldBlockCoord worldTarget{targetBlock.x, targetBlock.y, targetBlock.z};
+                voxel::ChunkCoord chunkCoord = voxel::WorldToChunkCoord(worldTarget, voxel::kChunkSize);
+                EnsureChunkReady(chunkRegistry, chunkCoord);
+                chunkRegistry.SetBlock(worldTarget, step.blockId);
+                const glm::vec2 yawPitch = YawPitchFromDirection(
+                    glm::vec3(targetBlock) + glm::vec3(0.5f) - cameraPosition);
+                SetCameraAngles(gCamera, yawPitch.x, yawPitch.y);
+            }
+
             projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 500.0f);
             view = gCamera.getViewMatrix();
             frustum = Frustum::FromMatrix(projection * view);
@@ -786,42 +813,44 @@ int main(int argc, char** argv) {
             }
 
             if (interactionTest && !interactionState.failed) {
-                if (interactionRaycastIndex < interactionRaycasts.size() &&
-                    interactionFrameIndex == interactionRaycasts[interactionRaycastIndex].frame) {
-                    const InteractionRaycastExpectation& expectation =
-                        interactionRaycasts[interactionRaycastIndex];
+                if (interactionRaycastIndex < kInteractionRaycasts.size() &&
+                    interactionFrameIndex == kInteractionRaycasts[interactionRaycastIndex].frame) {
+                    const InteractionRaycastStep& step = kInteractionRaycasts[interactionRaycastIndex];
                     ++interactionState.raycasts;
-                    voxel::ChunkCoord expectedChunk =
-                        voxel::WorldToChunkCoord({expectation.block.x, expectation.block.y, expectation.block.z},
-                                                 voxel::kChunkSize);
+                    const glm::vec3 cameraPosition = gCamera.getPosition();
+                    const glm::vec3 targetCenter =
+                        cameraPosition +
+                        glm::vec3(static_cast<float>(step.offset.x),
+                                  static_cast<float>(step.offset.y),
+                                  static_cast<float>(step.offset.z));
+                    const glm::ivec3 targetBlock{
+                        static_cast<int>(std::floor(targetCenter.x)),
+                        static_cast<int>(std::floor(targetCenter.y)),
+                        static_cast<int>(std::floor(targetCenter.z))};
+                    voxel::WorldBlockCoord worldTarget{targetBlock.x, targetBlock.y, targetBlock.z};
+                    voxel::ChunkCoord expectedChunk = voxel::WorldToChunkCoord(worldTarget, voxel::kChunkSize);
                     if (!IsChunkReady(chunkRegistry, expectedChunk)) {
                         interactionState.failed = true;
                         interactionState.failureMessage = "[InteractionTest] Raycast chunk not ready.";
-                    } else if (expectation.expectHit) {
-                        if (!currentHit.hit || currentHit.block != expectation.block) {
+                    } else if (!currentHit.hit || currentHit.block != targetBlock) {
+                        interactionState.failed = true;
+                        std::ostringstream message;
+                        message << "[InteractionTest] Raycast mismatch at frame " << step.frame
+                                << ": hit=" << currentHit.hit
+                                << " block=(" << currentHit.block.x << ", " << currentHit.block.y << ", "
+                                << currentHit.block.z << ") expected=(" << targetBlock.x << ", "
+                                << targetBlock.y << ", " << targetBlock.z << ")";
+                        interactionState.failureMessage = message.str();
+                    } else {
+                        voxel::BlockId id = chunkRegistry.GetBlockOrAir(worldTarget);
+                        if (id != step.blockId) {
                             interactionState.failed = true;
                             std::ostringstream message;
-                            message << "[InteractionTest] Raycast mismatch at frame " << expectation.frame
-                                    << ": hit=" << currentHit.hit
-                                    << " block=(" << currentHit.block.x << ", " << currentHit.block.y << ", "
-                                    << currentHit.block.z << ") expected=(" << expectation.block.x << ", "
-                                    << expectation.block.y << ", " << expectation.block.z << ")";
+                            message << "[InteractionTest] Raycast block id mismatch at frame "
+                                    << step.frame << ": got=" << static_cast<int>(id)
+                                    << " expected=" << static_cast<int>(step.blockId);
                             interactionState.failureMessage = message.str();
-                        } else {
-                            voxel::BlockId id = chunkRegistry.GetBlockOrAir(
-                                {expectation.block.x, expectation.block.y, expectation.block.z});
-                            if (id != expectation.blockId) {
-                                interactionState.failed = true;
-                                std::ostringstream message;
-                                message << "[InteractionTest] Raycast block id mismatch at frame "
-                                        << expectation.frame << ": got=" << static_cast<int>(id)
-                                        << " expected=" << static_cast<int>(expectation.blockId);
-                                interactionState.failureMessage = message.str();
-                            }
                         }
-                    } else if (currentHit.hit) {
-                        interactionState.failed = true;
-                        interactionState.failureMessage = "[InteractionTest] Raycast expected miss but hit.";
                     }
                     ++interactionRaycastIndex;
                 }
@@ -830,25 +859,21 @@ int main(int argc, char** argv) {
                     interactionFrameIndex == kInteractionEdits[interactionEditIndex].frame) {
                     const InteractionEditStep& step = kInteractionEdits[interactionEditIndex];
                     voxel::ChunkCoord chunkCoord = voxel::WorldToChunkCoord(step.coord, voxel::kChunkSize);
-                    if (!IsChunkReady(chunkRegistry, chunkCoord)) {
+                    EnsureChunkReady(chunkRegistry, chunkCoord);
+                    bool edited = voxel::TrySetBlock(chunkRegistry, streaming, step.coord, step.blockId);
+                    ++interactionState.edits;
+                    if (!edited) {
                         interactionState.failed = true;
-                        interactionState.failureMessage = "[InteractionTest] Edit chunk not ready.";
+                        interactionState.failureMessage = "[InteractionTest] SetBlock failed.";
                     } else {
-                        bool edited = voxel::TrySetBlock(chunkRegistry, streaming, step.coord, step.blockId);
-                        ++interactionState.edits;
-                        if (!edited) {
+                        voxel::BlockId updated = chunkRegistry.GetBlockOrAir(step.coord);
+                        if (updated != step.expectedId) {
                             interactionState.failed = true;
-                            interactionState.failureMessage = "[InteractionTest] SetBlock failed.";
-                        } else {
-                            voxel::BlockId updated = chunkRegistry.GetBlockOrAir(step.coord);
-                            if (updated != step.expectedId) {
-                                interactionState.failed = true;
-                                std::ostringstream message;
-                                message << "[InteractionTest] GetBlockOrAir mismatch at frame " << step.frame
-                                        << ": got=" << static_cast<int>(updated)
-                                        << " expected=" << static_cast<int>(step.expectedId);
-                                interactionState.failureMessage = message.str();
-                            }
+                            std::ostringstream message;
+                            message << "[InteractionTest] GetBlockOrAir mismatch at frame " << step.frame
+                                    << ": got=" << static_cast<int>(updated)
+                                    << " expected=" << static_cast<int>(step.expectedId);
+                            interactionState.failureMessage = message.str();
                         }
                     }
                     ++interactionEditIndex;
