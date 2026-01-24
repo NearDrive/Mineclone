@@ -28,6 +28,8 @@
 
 #include "Camera.h"
 #include "Shader.h"
+#include "app/AppInput.h"
+#include "app/AppMode.h"
 #include "core/Assert.h"
 #include "core/Cli.h"
 #include "core/Profiler.h"
@@ -89,48 +91,12 @@ const glm::vec3 kInteractionMoveDir(-2.0f, 0.0f, -2.0f);
 const glm::vec3 kPlayerSpawn(0.0f, 20.0f, 0.0f);
 const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
 
-Camera gCamera(kPlayerSpawn + kEyeOffset, -90.0f, -15.0f);
-bool gFirstMouse = true;
-bool gMouseCaptured = true;
-float gLastX = static_cast<float>(kWindowWidth) / 2.0f;
-float gLastY = static_cast<float>(kWindowHeight) / 2.0f;
-
 void glfwErrorCallback(int error, const char* description) {
     std::cerr << "[GLFW] Error " << error << ": " << description << '\n';
 }
 
 void framebufferSizeCallback(GLFWwindow*, int width, int height) {
     glViewport(0, 0, width, height);
-}
-
-void mouseCallback(GLFWwindow* window, double xpos, double ypos) {
-    if (!gMouseCaptured) {
-        return;
-    }
-
-    if (gFirstMouse) {
-        gLastX = static_cast<float>(xpos);
-        gLastY = static_cast<float>(ypos);
-        gFirstMouse = false;
-    }
-
-    float xoffset = static_cast<float>(xpos) - gLastX;
-    float yoffset = gLastY - static_cast<float>(ypos);
-    gLastX = static_cast<float>(xpos);
-    gLastY = static_cast<float>(ypos);
-
-    gCamera.processMouseMovement(xoffset, yoffset);
-    (void)window;
-}
-
-void setMouseCapture(GLFWwindow* window, bool capture) {
-    gMouseCaptured = capture;
-    if (capture) {
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        gFirstMouse = true;
-    } else {
-        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-    }
 }
 
 void SetCameraAngles(Camera& camera, float yaw, float pitch) {
@@ -438,7 +404,7 @@ int main(int argc, char** argv) {
 
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
-    glfwSetCursorPosCallback(window, mouseCallback);
+    glfwSetCursorPosCallback(window, app::MouseCallback);
 
     if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
         std::cerr << "[Init] Failed to initialize GLAD.\n";
@@ -473,12 +439,40 @@ int main(int argc, char** argv) {
     glCullFace(GL_BACK);
     glFrontFace(GL_CCW);
 
-    setMouseCapture(window, allowInput || interactionTest || runSoakTest);
+    app::SetMouseCapture(window, allowInput || interactionTest || runSoakTest);
+    app::gCamera.setPosition(kPlayerSpawn + kEyeOffset);
     if (interactionTest || runSoakTest) {
-        gCamera.setMouseSensitivity(1.0f);
+        app::gCamera.setMouseSensitivity(1.0f);
         if (interactionTest) {
-            SetCameraAngles(gCamera, -135.0f, -89.0f);
+            SetCameraAngles(app::gCamera, -135.0f, -89.0f);
         }
+    }
+
+    if (!interactionTest && !runSoakTest) {
+        app::AppModeOptions appOptions;
+        appOptions.allowInput = allowInput;
+        appOptions.smokeTest = smokeTest;
+        app::AppMode appMode(window, appOptions);
+        if (!appMode.IsInitialized()) {
+            std::cerr << appMode.InitError() << '\n';
+            glfwDestroyWindow(window);
+            glfwTerminate();
+            return EXIT_FAILURE;
+        }
+
+        while (!glfwWindowShouldClose(window) && !appMode.ShouldExit()) {
+            appMode.Tick();
+            glfwSwapBuffers(window);
+            glfwPollEvents();
+        }
+
+        appMode.Shutdown();
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        if (smokeTest && appMode.SmokeFailed()) {
+            return EXIT_FAILURE;
+        }
+        return EXIT_SUCCESS;
     }
 
     bool smokeFailed = false;
@@ -698,8 +692,8 @@ int main(int argc, char** argv) {
                 int escState = glfwGetKey(window, GLFW_KEY_ESCAPE);
                 if (escState == GLFW_PRESS && !escPressed) {
                     escPressed = true;
-                    if (gMouseCaptured) {
-                        setMouseCapture(window, false);
+                    if (app::gMouseCaptured) {
+                        app::SetMouseCapture(window, false);
                     }
                 } else if (escState == GLFW_RELEASE) {
                     escPressed = false;
@@ -801,8 +795,8 @@ int main(int argc, char** argv) {
                     distanceTogglePressed = false;
                 }
 
-                if (gMouseCaptured) {
-                    float yawRadians = glm::radians(gCamera.getYaw());
+                if (app::gMouseCaptured) {
+                    float yawRadians = glm::radians(app::gCamera.getYaw());
                     glm::vec3 forward(std::cos(yawRadians), 0.0f, std::sin(yawRadians));
                     glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
 
@@ -827,7 +821,7 @@ int main(int argc, char** argv) {
                 int spaceState = glfwGetKey(window, GLFW_KEY_SPACE);
                 if (spaceState == GLFW_PRESS && !spacePressed) {
                     spacePressed = true;
-                    if (gMouseCaptured) {
+                    if (app::gMouseCaptured) {
                         jumpPressed = true;
                     }
                 } else if (spaceState == GLFW_RELEASE) {
@@ -853,14 +847,14 @@ int main(int argc, char** argv) {
                 const glm::vec3 direction = nextPosition - cameraPosition;
                 player.SetPosition(cameraPosition - kEyeOffset);
                 player.ResetVelocity();
-                gCamera.setPosition(cameraPosition);
+                app::gCamera.setPosition(cameraPosition);
                 if (glm::length(direction) > 0.001f) {
                     const glm::vec2 yawPitch = YawPitchFromDirection(direction);
-                    SetCameraAngles(gCamera, yawPitch.x, yawPitch.y);
+                    SetCameraAngles(app::gCamera, yawPitch.x, yawPitch.y);
                 }
             } else {
                 player.Update(chunkRegistry, desiredDir, jumpPressed, deltaTime);
-                gCamera.setPosition(player.Position() + kEyeOffset);
+                app::gCamera.setPosition(player.Position() + kEyeOffset);
             }
 
             glClearColor(0.08f, 0.10f, 0.15f, 1.0f);
@@ -876,14 +870,14 @@ int main(int argc, char** argv) {
                 const InteractionRaycastStep& step = kInteractionRaycasts[interactionRaycastIndex];
                 player.SetPosition(step.cameraPosition - kEyeOffset);
                 player.ResetVelocity();
-                gCamera.setPosition(step.cameraPosition);
+                app::gCamera.setPosition(step.cameraPosition);
                 voxel::WorldBlockCoord worldTarget{step.targetBlock.x, step.targetBlock.y, step.targetBlock.z};
                 voxel::ChunkCoord chunkCoord = voxel::WorldToChunkCoord(worldTarget, voxel::kChunkSize);
                 EnsureChunkReady(chunkRegistry, chunkCoord);
                 chunkRegistry.SetBlock(worldTarget, step.blockId);
                 const glm::vec2 yawPitch = YawPitchFromDirection(
                     glm::vec3(step.targetBlock) + glm::vec3(0.5f) - step.cameraPosition);
-                SetCameraAngles(gCamera, yawPitch.x, yawPitch.y);
+                SetCameraAngles(app::gCamera, yawPitch.x, yawPitch.y);
             }
 
             if (runSoakTest && soakRaycastIndex < kSoakRaycasts.size() &&
@@ -901,30 +895,30 @@ int main(int argc, char** argv) {
                 const SoakRaycastStep& step = kSoakRaycasts[soakRaycastIndex];
                 player.SetPosition(step.cameraPosition - kEyeOffset);
                 player.ResetVelocity();
-                gCamera.setPosition(step.cameraPosition);
+                app::gCamera.setPosition(step.cameraPosition);
                 if (step.useTarget) {
                     voxel::WorldBlockCoord worldTarget{step.targetBlock.x, step.targetBlock.y, step.targetBlock.z};
                     voxel::ChunkCoord chunkCoord = voxel::WorldToChunkCoord(worldTarget, voxel::kChunkSize);
                     EnsureChunkReady(chunkRegistry, chunkCoord);
                     const glm::vec2 yawPitch = YawPitchFromDirection(
                         glm::vec3(step.targetBlock) + glm::vec3(0.5f) - step.cameraPosition);
-                    SetCameraAngles(gCamera, yawPitch.x, yawPitch.y);
+                    SetCameraAngles(app::gCamera, yawPitch.x, yawPitch.y);
                 } else {
                     const glm::vec2 yawPitch = YawPitchFromDirection(step.direction);
-                    SetCameraAngles(gCamera, yawPitch.x, yawPitch.y);
+                    SetCameraAngles(app::gCamera, yawPitch.x, yawPitch.y);
                 }
             }
 
             projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 500.0f);
-            view = gCamera.getViewMatrix();
+            view = app::gCamera.getViewMatrix();
             frustum = Frustum::FromMatrix(projection * view);
             lightDir = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));
 
             currentHit = {};
             hasTarget = false;
             debugDraw.Clear();
-            if (gMouseCaptured || interactionTest || runSoakTest) {
-                currentHit = voxel::RaycastBlocks(chunkRegistry, gCamera.getPosition(), gCamera.getFront(),
+            if (app::gMouseCaptured || interactionTest || runSoakTest) {
+                currentHit = voxel::RaycastBlocks(chunkRegistry, app::gCamera.getPosition(), app::gCamera.getFront(),
                                                   kReachDistance);
                 if (currentHit.hit) {
                     hasTarget = true;
@@ -938,8 +932,8 @@ int main(int argc, char** argv) {
                 int leftState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);
                 if (leftState == GLFW_PRESS && !leftClickPressed) {
                     leftClickPressed = true;
-                    if (!gMouseCaptured) {
-                        setMouseCapture(window, true);
+                    if (!app::gMouseCaptured) {
+                        app::SetMouseCapture(window, true);
                     } else if (hasTarget) {
                         voxel::WorldBlockCoord target{currentHit.block.x, currentHit.block.y, currentHit.block.z};
                         voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockAir);
@@ -951,7 +945,7 @@ int main(int argc, char** argv) {
                 int rightState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
                 if (rightState == GLFW_PRESS && !rightClickPressed) {
                     rightClickPressed = true;
-                    if (gMouseCaptured && hasTarget && currentHit.normal != glm::ivec3(0)) {
+                    if (app::gMouseCaptured && hasTarget && currentHit.normal != glm::ivec3(0)) {
                         glm::ivec3 placeBlock = currentHit.block + currentHit.normal;
                         voxel::WorldBlockCoord target{placeBlock.x, placeBlock.y, placeBlock.z};
                         if (chunkRegistry.GetBlockOrAir(target) == voxel::kBlockAir) {
@@ -1412,11 +1406,11 @@ int main(int argc, char** argv) {
             AppendFloat(checksumBuffer, player.Position().x);
             AppendFloat(checksumBuffer, player.Position().y);
             AppendFloat(checksumBuffer, player.Position().z);
-            AppendFloat(checksumBuffer, gCamera.getPosition().x);
-            AppendFloat(checksumBuffer, gCamera.getPosition().y);
-            AppendFloat(checksumBuffer, gCamera.getPosition().z);
-            AppendFloat(checksumBuffer, gCamera.getYaw());
-            AppendFloat(checksumBuffer, gCamera.getPitch());
+            AppendFloat(checksumBuffer, app::gCamera.getPosition().x);
+            AppendFloat(checksumBuffer, app::gCamera.getPosition().y);
+            AppendFloat(checksumBuffer, app::gCamera.getPosition().z);
+            AppendFloat(checksumBuffer, app::gCamera.getYaw());
+            AppendFloat(checksumBuffer, app::gCamera.getPitch());
 
             const std::array<voxel::WorldBlockCoord, 5> samples = {{
                 {0, 7, 0},
@@ -1471,11 +1465,11 @@ int main(int argc, char** argv) {
             AppendFloat(checksumBuffer, player.Position().x);
             AppendFloat(checksumBuffer, player.Position().y);
             AppendFloat(checksumBuffer, player.Position().z);
-            AppendFloat(checksumBuffer, gCamera.getPosition().x);
-            AppendFloat(checksumBuffer, gCamera.getPosition().y);
-            AppendFloat(checksumBuffer, gCamera.getPosition().z);
-            AppendFloat(checksumBuffer, gCamera.getYaw());
-            AppendFloat(checksumBuffer, gCamera.getPitch());
+            AppendFloat(checksumBuffer, app::gCamera.getPosition().x);
+            AppendFloat(checksumBuffer, app::gCamera.getPosition().y);
+            AppendFloat(checksumBuffer, app::gCamera.getPosition().z);
+            AppendFloat(checksumBuffer, app::gCamera.getYaw());
+            AppendFloat(checksumBuffer, app::gCamera.getPitch());
             AppendInt32(checksumBuffer, soakState.workerThreads);
 
             for (const auto& sample : soakSamples) {

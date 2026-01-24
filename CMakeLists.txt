@@ -47,6 +47,12 @@ add_executable(Mineclone
   src/Shader.h
   src/Camera.cpp
   src/Camera.h
+  src/app/AppInput.cpp
+  src/app/AppInput.h
+  src/app/AppMode.cpp
+  src/app/AppMode.h
+  src/app/GameState.h
+  src/app/MenuModel.h
   src/game/Player.cpp
   src/game/Player.h
   src/core/Assert.h

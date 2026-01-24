@@ -28,7 +28,7 @@ cmake --build build-sanitize --config Debug
 
 ## Smoke Test
 
-The smoke test runs a fixed-length deterministic loop and exits automatically.
+The smoke test runs a deterministic menu flow (new world -> pause -> save -> exit to menu -> exit app) and exits automatically. On success it prints `[Smoke] OK: menu flow + save completed`.
 
 ```bash
 ./build-debug/Mineclone --smoke-test
@@ -39,6 +39,22 @@ In CI or headless setups, disable GL debug output:
 ```bash
 ./build-debug/Mineclone --smoke-test --no-gl-debug
 ```
+
+## Menu Controls
+
+Main menu (on startup):
+
+- `1` New World
+- `2` Load World
+- `3` Exit
+
+Pause menu (press `ESC` while playing):
+
+- `1` Continue
+- `2` Save World
+- `3` Exit to Main Menu
+
+Saves are stored under `./saves/world_0/`.
 
 ## Self-Tests Coverage
 
