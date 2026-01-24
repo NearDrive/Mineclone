@@ -26,6 +26,7 @@
 #include "voxel/ChunkMesher.h"
 #include "voxel/ChunkRegistry.h"
 #include "voxel/ChunkStreaming.h"
+#include "voxel/ChunkBounds.h"
 #include "voxel/Raycast.h"
 #include "voxel/VoxelCoords.h"
 
@@ -167,6 +168,7 @@ std::string StateLabel(GameState state) {
     return "Unknown";
 }
 
+AppMode::~AppMode() = default;
 
 AppMode::AppMode(GLFWwindow* window, const AppModeOptions& options)
     : window_(window), options_(options) {
