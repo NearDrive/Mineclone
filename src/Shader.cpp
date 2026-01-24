@@ -56,6 +56,19 @@ Shader::~Shader() {
     Destroy();
 }
 
+Shader::Shader(Shader&& other) noexcept : programId_(other.programId_) {
+    other.programId_ = 0;
+}
+
+Shader& Shader::operator=(Shader&& other) noexcept {
+    if (this != &other) {
+        Destroy();
+        programId_ = other.programId_;
+        other.programId_ = 0;
+    }
+    return *this;
+}
+
 void Shader::Destroy() {
     if (programId_ != 0) {
         glDeleteProgram(programId_);

@@ -14,6 +14,8 @@ public:
 
     Shader(const Shader&) = delete;
     Shader& operator=(const Shader&) = delete;
+    Shader(Shader&& other) noexcept;
+    Shader& operator=(Shader&& other) noexcept;
 
     bool loadFromFiles(const std::string& vertexPath, const std::string& fragmentPath, std::string& errorOut);
     void Destroy();

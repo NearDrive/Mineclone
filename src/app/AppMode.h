@@ -19,6 +19,7 @@ struct AppModeOptions {
 class AppMode {
 public:
     AppMode(GLFWwindow* window, const AppModeOptions& options);
+    ~AppMode();
 
     bool IsInitialized() const;
     const std::string& InitError() const;
