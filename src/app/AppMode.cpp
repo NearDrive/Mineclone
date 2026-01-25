@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -46,8 +47,34 @@ constexpr float kMaxDeltaTime = 0.05f;
 constexpr float kSmokeDeltaTime = 1.0f / 60.0f;
 constexpr int kWorkerThreadsDefault = 2;
 constexpr int kSmokeMenuWorldFrames = 60;
+constexpr std::string_view kWorldPrefix = "world_";
 const glm::vec3 kPlayerSpawn(0.0f, 20.0f, 0.0f);
 const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
+
+std::string FormatWorldId(std::time_t timestamp) {
+    std::tm localTime{};
+#if defined(_WIN32)
+    localtime_s(&localTime, &timestamp);
+#else
+    localtime_r(&timestamp, &localTime);
+#endif
+    std::ostringstream out;
+    out << kWorldPrefix << std::put_time(&localTime, "%Y%m%d_%H%M%S");
+    return out.str();
+}
+
+bool WorldHasChunkFiles(const std::filesystem::path& root) {
+    std::error_code error;
+    if (!std::filesystem::exists(root, error)) {
+        return false;
+    }
+    for (const auto& entry : std::filesystem::directory_iterator(root, error)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".bin") {
+            return true;
+        }
+    }
+    return false;
+}
 
 } // namespace
 
@@ -305,7 +332,7 @@ void AppMode::HandleMenuInput() {
     if (key1State == GLFW_PRESS && !key1Pressed_) {
         key1Pressed_ = true;
         if (state_ == GameState::MainMenu) {
-            StartNewWorld();
+            StartNewWorld(GenerateNewWorldId());
         } else if (state_ == GameState::PauseMenu) {
             SetState(GameState::Playing);
         }
@@ -372,11 +399,12 @@ void AppMode::UpdateMenuTitle(bool force) {
     lastTitleUpdate_ = now;
 }
 
-void AppMode::StartNewWorld() {
+void AppMode::StartNewWorld(const std::string& worldId) {
     if (world_) {
         StopWorldAndReturnToMenu();
     }
 
+    worldId_ = worldId;
     const std::filesystem::path storageRoot =
         persistence::ChunkStorage::DefaultSavePath().parent_path() / worldId_;
 
@@ -392,13 +420,14 @@ void AppMode::StartNewWorld() {
 }
 
 void AppMode::StartLoadedWorld() {
-    if (!WorldExists()) {
+    const std::optional<std::string> latestWorld = FindLatestWorldId();
+    if (!latestWorld) {
         loadMissing_ = true;
-        std::cout << "[Menu] No saved world found at saves/" << worldId_ << ".\n";
+        std::cout << "[Menu] No saved world found in saves/.\n";
         UpdateMenuTitle(true);
         return;
     }
-    StartNewWorld();
+    StartNewWorld(*latestWorld);
 }
 
 void AppMode::StopWorldAndReturnToMenu() {
@@ -432,18 +461,63 @@ bool AppMode::SaveWorld() {
     return true;
 }
 
-bool AppMode::WorldExists() const {
-    const std::filesystem::path root = persistence::ChunkStorage::DefaultSavePath().parent_path() / worldId_;
-    std::error_code error;
-    if (!std::filesystem::exists(root, error)) {
-        return false;
+bool AppMode::WorldExists(const std::string& worldId) const {
+    const std::filesystem::path root = persistence::ChunkStorage::DefaultSavePath().parent_path() / worldId;
+    return WorldHasChunkFiles(root);
+}
+
+std::string AppMode::GenerateNewWorldId() const {
+    const auto now = std::chrono::system_clock::now();
+    std::time_t timestamp = std::chrono::system_clock::to_time_t(now);
+    std::string candidate = FormatWorldId(timestamp);
+    if (!WorldExists(candidate)) {
+        return candidate;
     }
-    for (const auto& entry : std::filesystem::directory_iterator(root, error)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".bin") {
-            return true;
+    int suffix = 1;
+    while (true) {
+        std::ostringstream out;
+        out << candidate << "_" << suffix;
+        std::string attempt = out.str();
+        if (!WorldExists(attempt)) {
+            return attempt;
+        }
+        ++suffix;
+    }
+}
+
+std::optional<std::string> AppMode::FindLatestWorldId() const {
+    const std::filesystem::path savesRoot = persistence::ChunkStorage::DefaultSavePath().parent_path();
+    std::error_code error;
+    if (!std::filesystem::exists(savesRoot, error)) {
+        return std::nullopt;
+    }
+
+    std::optional<std::string> latestId;
+    std::filesystem::file_time_type latestTime{};
+
+    for (const auto& entry : std::filesystem::directory_iterator(savesRoot, error)) {
+        if (!entry.is_directory()) {
+            continue;
+        }
+        const std::string name = entry.path().filename().string();
+        if (name.rfind(kWorldPrefix, 0) != 0) {
+            continue;
+        }
+        if (!WorldHasChunkFiles(entry.path())) {
+            continue;
+        }
+        std::error_code timeError;
+        const auto writeTime = std::filesystem::last_write_time(entry.path(), timeError);
+        if (timeError) {
+            continue;
+        }
+        if (!latestId || writeTime > latestTime) {
+            latestId = name;
+            latestTime = writeTime;
         }
     }
-    return false;
+
+    return latestId;
 }
 
 void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_point& now,
@@ -815,7 +889,7 @@ void AppMode::AdvanceSmokeTest() {
     static bool saveRequested = false;
 
     if (state_ == GameState::MainMenu && step == 0) {
-        StartNewWorld();
+        StartNewWorld(GenerateNewWorldId());
         step = 1;
         smokeFrames = 0;
         return;

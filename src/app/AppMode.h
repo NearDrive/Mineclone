@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "Shader.h"
@@ -40,11 +41,13 @@ private:
 
     void UpdateMenuTitle(bool force);
 
-    void StartNewWorld();
+    void StartNewWorld(const std::string& worldId);
     void StartLoadedWorld();
     void StopWorldAndReturnToMenu();
     bool SaveWorld();
-    bool WorldExists() const;
+    bool WorldExists(const std::string& worldId) const;
+    std::string GenerateNewWorldId() const;
+    std::optional<std::string> FindLatestWorldId() const;
 
     void TickWorld(float deltaTime, const std::chrono::steady_clock::time_point& now,
                    bool allowInput, bool updateStreaming, bool updateTitle);
