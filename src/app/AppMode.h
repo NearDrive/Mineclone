@@ -74,6 +74,7 @@ private:
 
     bool smokeCompleted_ = false;
     bool smokeFailed_ = false;
+    bool menuHintPrinted_ = false;
 
     struct WorldRuntime;
     std::unique_ptr<WorldRuntime> world_;

@@ -43,6 +43,7 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - **F4**: Toggle periodic perf logging to stdout
 - **F5**: Force-save all dirty loaded chunks
 - **F6**: Toggle streaming (pause/resume)
+- **Menu**: The main/pause menu is shown in the window title bar. Press **1** for New/Continue, **2** for Load/Save, **3** to Exit.
 
 ## Notes
 - The executable prints GPU vendor/renderer/version on startup.
