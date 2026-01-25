@@ -289,6 +289,10 @@ void AppMode::SetState(GameState state) {
     } else {
         SetMouseCapture(window_, false);
     }
+    if (state_ == GameState::MainMenu && !menuHintPrinted_) {
+        std::cout << "[Menu] Press 1 for New, 2 for Load, 3 to Exit.\n";
+        menuHintPrinted_ = true;
+    }
     UpdateMenuTitle(true);
 }
 
