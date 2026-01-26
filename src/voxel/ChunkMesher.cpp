@@ -75,12 +75,14 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const C
                     }
 
                     std::uint32_t baseIndex = static_cast<std::uint32_t>(vertices.size());
-                    for (const glm::vec3& vertex : face.vertices) {
+                    for (std::size_t i = 0; i < face.vertices.size(); ++i) {
+                        const glm::vec3& vertex = face.vertices[i];
                         vertices.push_back({glm::vec3{
                                                 static_cast<float>(world.x) + vertex.x,
                                                 static_cast<float>(world.y) + vertex.y,
                                                 static_cast<float>(world.z) + vertex.z},
-                                            face.normal});
+                                            face.normal,
+                                            face.uvs[i]});
                     }
 
                     indices.push_back(baseIndex + 0);

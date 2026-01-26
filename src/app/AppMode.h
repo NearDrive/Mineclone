@@ -5,6 +5,8 @@
 #include <optional>
 #include <string>
 
+#include <glad/glad.h>
+
 #include "Shader.h"
 #include "app/GameState.h"
 
@@ -34,6 +36,7 @@ public:
 
 private:
     void InitializeShaders();
+    void InitializeTextures();
     void SetState(GameState state);
 
     void HandleMenuInput();
@@ -83,6 +86,7 @@ private:
     std::unique_ptr<WorldRuntime> world_;
     Shader shader_;
     Shader debugShader_;
+    GLuint blockTexture_ = 0;
 };
 
 } // namespace app

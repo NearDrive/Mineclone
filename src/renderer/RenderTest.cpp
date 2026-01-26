@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -36,6 +37,78 @@ namespace {
 
 constexpr float kFov = 60.0f;
 constexpr glm::vec3 kClearColor(0.08f, 0.10f, 0.15f);
+
+GLuint CreateTextureFromPixels(int width, int height, const std::vector<std::uint8_t>& pixels) {
+    if (width <= 0 || height <= 0 || pixels.empty()) {
+        return 0;
+    }
+
+    GLuint texture = 0;
+    glad_glGenTextures(1, &texture);
+    glad_glBindTexture(GL_TEXTURE_2D, texture);
+    glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    return texture;
+}
+
+std::vector<std::uint8_t> BuildProceduralDirtPixels(int width, int height) {
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u);
+    std::uint32_t state = 0x1234abcd;
+    auto nextRandom = [&state]() {
+        state = state * 1664525u + 1013904223u;
+        return state;
+    };
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const std::uint32_t noiseSeed =
+                nextRandom() + static_cast<std::uint32_t>(x * 374761393u) + static_cast<std::uint32_t>(y * 668265263u);
+            const int noise = static_cast<int>((noiseSeed >> 24) & 0xFF) % 37 - 18;
+            int r = 110 + noise + static_cast<int>((noiseSeed >> 16) & 0xF) - 7;
+            int g = 80 + noise;
+            int b = 50 + noise + static_cast<int>((noiseSeed >> 12) & 0x7) - 3;
+            if (((noiseSeed >> 8) & 0xFF) < 15) {
+                r += 20;
+                g += 20;
+                b += 20;
+            }
+            r = std::clamp(r, 0, 255);
+            g = std::clamp(g, 0, 255);
+            b = std::clamp(b, 0, 255);
+
+            const std::size_t index = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                                       static_cast<std::size_t>(x)) *
+                                      4u;
+            pixels[index + 0] = static_cast<std::uint8_t>(r);
+            pixels[index + 1] = static_cast<std::uint8_t>(g);
+            pixels[index + 2] = static_cast<std::uint8_t>(b);
+            pixels[index + 3] = 255;
+        }
+    }
+    return pixels;
+}
+
+GLuint CreateProceduralDirtTexture(int width, int height) {
+    auto pixels = BuildProceduralDirtPixels(width, height);
+    return CreateTextureFromPixels(width, height, pixels);
+}
+
+GLuint LoadTexture2D(const std::string& path) {
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    stbi_uc* data = stbi_load(path.c_str(), &width, &height, &channels, 4);
+    if (!data) {
+        return 0;
+    }
+
+    std::vector<std::uint8_t> pixels(data, data + (width * height * 4));
+    stbi_image_free(data);
+    return CreateTextureFromPixels(width, height, pixels);
+}
 
 void glfwErrorCallback(int error, const char* description) {
     std::cerr << "[GLFW] Error " << error << ": " << description << '\n';
@@ -256,6 +329,18 @@ int RunRenderTest(const RenderTestOptions& options) {
     }
     std::cout << "[RenderTest] Shaders loaded.\n";
 
+    GLuint blockTexture = LoadTexture2D("textures/dirt.png");
+    if (blockTexture == 0) {
+        blockTexture = CreateProceduralDirtTexture(32, 32);
+        if (blockTexture == 0) {
+            std::cerr << "[RenderTest] Failed to load or generate textures/dirt.png\n";
+            glfwDestroyWindow(window);
+            glfwTerminate();
+            return EXIT_FAILURE;
+        }
+        std::cout << "[RenderTest] Using procedurally generated dirt texture.\n";
+    }
+
     GLuint fbo = 0;
     GLuint color = 0;
     GLuint depth = 0;
@@ -340,6 +425,9 @@ int RunRenderTest(const RenderTestOptions& options) {
             shader.setMat4("uProjection", projection);
             shader.setMat4("uView", view);
             shader.setVec3("uLightDir", lightDir);
+            shader.setInt("uTexture", 0);
+            glad_glActiveTexture(GL_TEXTURE0);
+            glad_glBindTexture(GL_TEXTURE_2D, blockTexture);
             entry->mesh.Draw();
         }
         GLenum frameError = glad_glGetError();
@@ -404,6 +492,9 @@ int RunRenderTest(const RenderTestOptions& options) {
     }
 
     shader.Destroy();
+    if (blockTexture != 0) {
+        glad_glDeleteTextures(1, &blockTexture);
+    }
     glad_glDeleteFramebuffers(1, &fbo);
     glad_glDeleteTextures(1, &color);
     glad_glDeleteRenderbuffers(1, &depth);

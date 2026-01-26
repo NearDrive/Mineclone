@@ -1,6 +1,7 @@
 #include "app/AppMode.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <ctime>
 #include <filesystem>
@@ -8,10 +9,13 @@
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <vector>
 
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+
+#include "stb_image.h"
 
 #include "app/AppInput.h"
 #include "app/GameState.h"
@@ -50,6 +54,78 @@ constexpr int kSmokeMenuWorldFrames = 60;
 constexpr std::string_view kWorldPrefix = "world_";
 const glm::vec3 kPlayerSpawn(0.0f, 20.0f, 0.0f);
 const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
+
+GLuint CreateTextureFromPixels(int width, int height, const std::vector<std::uint8_t>& pixels) {
+    if (width <= 0 || height <= 0 || pixels.empty()) {
+        return 0;
+    }
+
+    GLuint texture = 0;
+    glad_glGenTextures(1, &texture);
+    glad_glBindTexture(GL_TEXTURE_2D, texture);
+    glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    return texture;
+}
+
+std::vector<std::uint8_t> BuildProceduralDirtPixels(int width, int height) {
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u);
+    std::uint32_t state = 0x1234abcd;
+    auto nextRandom = [&state]() {
+        state = state * 1664525u + 1013904223u;
+        return state;
+    };
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const std::uint32_t noiseSeed =
+                nextRandom() + static_cast<std::uint32_t>(x * 374761393u) + static_cast<std::uint32_t>(y * 668265263u);
+            const int noise = static_cast<int>((noiseSeed >> 24) & 0xFF) % 37 - 18;
+            int r = 110 + noise + static_cast<int>((noiseSeed >> 16) & 0xF) - 7;
+            int g = 80 + noise;
+            int b = 50 + noise + static_cast<int>((noiseSeed >> 12) & 0x7) - 3;
+            if (((noiseSeed >> 8) & 0xFF) < 15) {
+                r += 20;
+                g += 20;
+                b += 20;
+            }
+            r = std::clamp(r, 0, 255);
+            g = std::clamp(g, 0, 255);
+            b = std::clamp(b, 0, 255);
+
+            const std::size_t index = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                                       static_cast<std::size_t>(x)) *
+                                      4u;
+            pixels[index + 0] = static_cast<std::uint8_t>(r);
+            pixels[index + 1] = static_cast<std::uint8_t>(g);
+            pixels[index + 2] = static_cast<std::uint8_t>(b);
+            pixels[index + 3] = 255;
+        }
+    }
+    return pixels;
+}
+
+GLuint LoadTexture2D(const std::string& path) {
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    stbi_uc* data = stbi_load(path.c_str(), &width, &height, &channels, 4);
+    if (!data) {
+        return 0;
+    }
+
+    std::vector<std::uint8_t> pixels(data, data + (width * height * 4));
+    stbi_image_free(data);
+    return CreateTextureFromPixels(width, height, pixels);
+}
+
+GLuint CreateProceduralDirtTexture(int width, int height) {
+    auto pixels = BuildProceduralDirtPixels(width, height);
+    return CreateTextureFromPixels(width, height, pixels);
+}
 
 std::string FormatWorldId(std::time_t timestamp) {
     std::tm localTime{};
@@ -204,6 +280,9 @@ AppMode::AppMode(GLFWwindow* window, const AppModeOptions& options)
     lastTitleUpdate_ = lastTime_ - std::chrono::seconds(1);
     InitializeShaders();
     if (initialized_) {
+        InitializeTextures();
+    }
+    if (initialized_) {
         SetState(GameState::MainMenu);
     }
 }
@@ -235,6 +314,19 @@ void AppMode::InitializeShaders() {
     shader_ = std::move(shader);
     debugShader_ = std::move(debugShader);
     initialized_ = true;
+}
+
+void AppMode::InitializeTextures() {
+    blockTexture_ = LoadTexture2D("textures/dirt.png");
+    if (blockTexture_ == 0) {
+        blockTexture_ = CreateProceduralDirtTexture(32, 32);
+        if (blockTexture_ == 0) {
+            initError_ = "[Texture] Failed to load or generate textures/dirt.png";
+            initialized_ = false;
+        } else {
+            std::cout << "[Texture] Using procedurally generated dirt texture.\n";
+        }
+    }
 }
 
 void AppMode::Tick() {
@@ -289,6 +381,10 @@ void AppMode::Tick() {
 void AppMode::Shutdown() {
     if (world_) {
         StopWorldAndReturnToMenu();
+    }
+    if (blockTexture_ != 0) {
+        glad_glDeleteTextures(1, &blockTexture_);
+        blockTexture_ = 0;
     }
 }
 
@@ -738,6 +834,9 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
     shader_.setMat4("uProjection", world_->projection);
     shader_.setMat4("uView", world_->view);
     shader_.setVec3("uLightDir", world_->lightDir);
+    shader_.setInt("uTexture", 0);
+    glad_glActiveTexture(GL_TEXTURE0);
+    glad_glBindTexture(GL_TEXTURE_2D, blockTexture_);
 
     glm::vec3 playerPosition = world_->player.Position();
     voxel::WorldBlockCoord playerBlock{

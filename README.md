@@ -48,6 +48,7 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 ## Notes
 - The executable prints GPU vendor/renderer/version on startup.
 - In Debug builds, OpenGL KHR_debug messages are enabled (notifications filtered out).
+- All block textures are authored at **32x32** pixels and stored under `textures/`.
 
 ## Voxel World (PR-02)
 - `BlockId` uses `uint16_t` with constants: AIR=0, STONE=1, DIRT=2.
