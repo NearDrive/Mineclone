@@ -81,11 +81,16 @@ void ChunkMesh::UploadToGpu() {
     gpuIndexCount_ = indices_.size();
 
     glad_glEnableVertexAttribArray(0);
-    glad_glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(VoxelVertex), reinterpret_cast<void*>(0));
+    glad_glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(VoxelVertex),
+                               reinterpret_cast<void*>(offsetof(VoxelVertex, position)));
 
     glad_glEnableVertexAttribArray(1);
     glad_glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(VoxelVertex),
-                               reinterpret_cast<void*>(sizeof(glm::vec3)));
+                               reinterpret_cast<void*>(offsetof(VoxelVertex, normal)));
+
+    glad_glEnableVertexAttribArray(2);
+    glad_glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(VoxelVertex),
+                               reinterpret_cast<void*>(offsetof(VoxelVertex, uv)));
 
     glad_glBindVertexArray(0);
 }
