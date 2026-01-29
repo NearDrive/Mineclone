@@ -33,6 +33,7 @@ PFNGLBUFFERDATAPROC glad_glBufferData = NULL;
 PFNGLENABLEVERTEXATTRIBARRAYPROC glad_glEnableVertexAttribArray = NULL;
 PFNGLVERTEXATTRIBPOINTERPROC glad_glVertexAttribPointer = NULL;
 PFNGLGETUNIFORMLOCATIONPROC glad_glGetUniformLocation = NULL;
+PFNGLUNIFORM1IPROC glad_glUniform1i = NULL;
 PFNGLUNIFORM3FVPROC glad_glUniform3fv = NULL;
 PFNGLUNIFORMMATRIX4FVPROC glad_glUniformMatrix4fv = NULL;
 PFNGLDRAWELEMENTSPROC glad_glDrawElements = NULL;
@@ -56,6 +57,7 @@ PFNGLFINISHPROC glad_glFinish = NULL;
 PFNGLPIXELSTOREIPROC glad_glPixelStorei = NULL;
 PFNGLREADBUFFERPROC glad_glReadBuffer = NULL;
 PFNGLREADPIXELSPROC glad_glReadPixels = NULL;
+PFNGLACTIVETEXTUREPROC glad_glActiveTexture = NULL;
 PFNGLDELETEVERTEXARRAYSPROC glad_glDeleteVertexArrays = NULL;
 PFNGLDELETEBUFFERSPROC glad_glDeleteBuffers = NULL;
 PFNGLGETINTEGERVPROC glad_glGetIntegerv = NULL;
@@ -101,6 +103,7 @@ int gladLoadGLLoader(GLADloadproc load) {
     glad_glEnableVertexAttribArray = (PFNGLENABLEVERTEXATTRIBARRAYPROC)glad_get_proc(load, "glEnableVertexAttribArray");
     glad_glVertexAttribPointer = (PFNGLVERTEXATTRIBPOINTERPROC)glad_get_proc(load, "glVertexAttribPointer");
     glad_glGetUniformLocation = (PFNGLGETUNIFORMLOCATIONPROC)glad_get_proc(load, "glGetUniformLocation");
+    glad_glUniform1i = (PFNGLUNIFORM1IPROC)glad_get_proc(load, "glUniform1i");
     glad_glUniform3fv = (PFNGLUNIFORM3FVPROC)glad_get_proc(load, "glUniform3fv");
     glad_glUniformMatrix4fv = (PFNGLUNIFORMMATRIX4FVPROC)glad_get_proc(load, "glUniformMatrix4fv");
     glad_glDrawElements = (PFNGLDRAWELEMENTSPROC)glad_get_proc(load, "glDrawElements");
@@ -124,6 +127,7 @@ int gladLoadGLLoader(GLADloadproc load) {
     glad_glPixelStorei = (PFNGLPIXELSTOREIPROC)glad_get_proc(load, "glPixelStorei");
     glad_glReadBuffer = (PFNGLREADBUFFERPROC)glad_get_proc(load, "glReadBuffer");
     glad_glReadPixels = (PFNGLREADPIXELSPROC)glad_get_proc(load, "glReadPixels");
+    glad_glActiveTexture = (PFNGLACTIVETEXTUREPROC)glad_get_proc(load, "glActiveTexture");
     glad_glDeleteVertexArrays = (PFNGLDELETEVERTEXARRAYSPROC)glad_get_proc(load, "glDeleteVertexArrays");
     glad_glDeleteBuffers = (PFNGLDELETEBUFFERSPROC)glad_get_proc(load, "glDeleteBuffers");
     glad_glGetIntegerv = (PFNGLGETINTEGERVPROC)glad_get_proc(load, "glGetIntegerv");
@@ -138,13 +142,15 @@ int gladLoadGLLoader(GLADloadproc load) {
         !glad_glDeleteShader || !glad_glUseProgram || !glad_glDeleteProgram || !glad_glGenVertexArrays ||
         !glad_glBindVertexArray || !glad_glGenBuffers || !glad_glBindBuffer || !glad_glBufferData ||
         !glad_glEnableVertexAttribArray || !glad_glVertexAttribPointer || !glad_glGetUniformLocation ||
-        !glad_glUniform3fv || !glad_glUniformMatrix4fv || !glad_glDrawElements || !glad_glDrawArrays ||
+        !glad_glUniform1i || !glad_glUniform3fv || !glad_glUniformMatrix4fv || !glad_glDrawElements ||
+        !glad_glDrawArrays ||
         !glad_glGenTextures || !glad_glBindTexture || !glad_glTexImage2D || !glad_glTexParameteri ||
         !glad_glGenFramebuffers || !glad_glBindFramebuffer || !glad_glFramebufferTexture2D ||
         !glad_glGenRenderbuffers || !glad_glBindRenderbuffer || !glad_glRenderbufferStorage ||
         !glad_glFramebufferRenderbuffer || !glad_glCheckFramebufferStatus || !glad_glDeleteTextures ||
         !glad_glDeleteRenderbuffers || !glad_glDeleteFramebuffers || !glad_glFinish || !glad_glPixelStorei ||
-        !glad_glReadBuffer || !glad_glReadPixels || !glad_glDeleteVertexArrays || !glad_glDeleteBuffers ||
+        !glad_glReadBuffer || !glad_glReadPixels || !glad_glActiveTexture || !glad_glDeleteVertexArrays ||
+        !glad_glDeleteBuffers ||
         !glad_glGetIntegerv) {
         fprintf(stderr, "[glad] Failed to load one or more OpenGL functions.\n");
         return 0;

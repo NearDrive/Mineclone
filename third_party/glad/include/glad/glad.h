@@ -72,6 +72,7 @@ typedef void (APIENTRY *GLDEBUGPROC)(GLenum source, GLenum type, GLuint id, GLen
 #define GL_TEXTURE_WRAP_S 0x2802
 #define GL_TEXTURE_WRAP_T 0x2803
 #define GL_NEAREST 0x2600
+#define GL_REPEAT 0x2901
 #define GL_CLAMP_TO_EDGE 0x812F
 
 #define GL_UNSIGNED_BYTE 0x1401
@@ -108,6 +109,7 @@ typedef void (APIENTRY *GLDEBUGPROC)(GLenum source, GLenum type, GLuint id, GLen
 #define GL_DEBUG_SEVERITY_NOTIFICATION 0x826B
 #define GL_DONT_CARE 0x1100
 #define GL_NO_ERROR 0
+#define GL_TEXTURE0 0x84C0
 
 #ifdef __cplusplus
 typedef void *(*GLADloadproc)(const char *name);
@@ -149,6 +151,7 @@ typedef void (APIENTRY *PFNGLBUFFERDATAPROC)(GLenum target, GLsizeiptr size, con
 typedef void (APIENTRY *PFNGLENABLEVERTEXATTRIBARRAYPROC)(GLuint index);
 typedef void (APIENTRY *PFNGLVERTEXATTRIBPOINTERPROC)(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer);
 typedef GLint (APIENTRY *PFNGLGETUNIFORMLOCATIONPROC)(GLuint program, const GLchar *name);
+typedef void (APIENTRY *PFNGLUNIFORM1IPROC)(GLint location, GLint v0);
 typedef void (APIENTRY *PFNGLUNIFORM3FVPROC)(GLint location, GLsizei count, const GLfloat *value);
 typedef void (APIENTRY *PFNGLUNIFORMMATRIX4FVPROC)(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
 typedef void (APIENTRY *PFNGLDRAWELEMENTSPROC)(GLenum mode, GLsizei count, GLenum type, const void *indices);
@@ -176,6 +179,7 @@ typedef void (APIENTRY *PFNGLPIXELSTOREIPROC)(GLenum pname, GLint param);
 typedef void (APIENTRY *PFNGLREADBUFFERPROC)(GLenum src);
 typedef void (APIENTRY *PFNGLREADPIXELSPROC)(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type,
                                             void *pixels);
+typedef void (APIENTRY *PFNGLACTIVETEXTUREPROC)(GLenum texture);
 typedef void (APIENTRY *PFNGLDELETEVERTEXARRAYSPROC)(GLsizei n, const GLuint *arrays);
 typedef void (APIENTRY *PFNGLDELETEBUFFERSPROC)(GLsizei n, const GLuint *buffers);
 typedef void (APIENTRY *PFNGLGETINTEGERVPROC)(GLenum pname, GLint *data);
@@ -212,6 +216,7 @@ GLAPI PFNGLBUFFERDATAPROC glad_glBufferData;
 GLAPI PFNGLENABLEVERTEXATTRIBARRAYPROC glad_glEnableVertexAttribArray;
 GLAPI PFNGLVERTEXATTRIBPOINTERPROC glad_glVertexAttribPointer;
 GLAPI PFNGLGETUNIFORMLOCATIONPROC glad_glGetUniformLocation;
+GLAPI PFNGLUNIFORM1IPROC glad_glUniform1i;
 GLAPI PFNGLUNIFORM3FVPROC glad_glUniform3fv;
 GLAPI PFNGLUNIFORMMATRIX4FVPROC glad_glUniformMatrix4fv;
 GLAPI PFNGLDRAWELEMENTSPROC glad_glDrawElements;
@@ -235,6 +240,7 @@ GLAPI PFNGLFINISHPROC glad_glFinish;
 GLAPI PFNGLPIXELSTOREIPROC glad_glPixelStorei;
 GLAPI PFNGLREADBUFFERPROC glad_glReadBuffer;
 GLAPI PFNGLREADPIXELSPROC glad_glReadPixels;
+GLAPI PFNGLACTIVETEXTUREPROC glad_glActiveTexture;
 GLAPI PFNGLDELETEVERTEXARRAYSPROC glad_glDeleteVertexArrays;
 GLAPI PFNGLDELETEBUFFERSPROC glad_glDeleteBuffers;
 GLAPI PFNGLGETINTEGERVPROC glad_glGetIntegerv;
