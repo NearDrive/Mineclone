@@ -589,6 +589,7 @@ int main(int argc, char** argv) {
         }
 
         DebugDraw debugDraw;
+        DebugDraw crosshairDraw;
 
         voxel::ChunkRegistry chunkRegistry;
         voxel::ChunkMesher mesher;
@@ -952,6 +953,15 @@ int main(int argc, char** argv) {
             glfwGetFramebufferSize(window, &width, &height);
             float aspect = width > 0 && height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 
+            constexpr float kCrosshairHalfSizePx = 6.0f;
+            if (width > 0 && height > 0) {
+                const float halfWidthNdc = kCrosshairHalfSizePx / (0.5f * static_cast<float>(width));
+                const float halfHeightNdc = kCrosshairHalfSizePx / (0.5f * static_cast<float>(height));
+                crosshairDraw.UpdateCrosshair(halfWidthNdc, halfHeightNdc);
+            } else {
+                crosshairDraw.Clear();
+            }
+
             if (interactionTest && interactionRaycastIndex < kInteractionRaycasts.size() &&
                 interactionFrameIndex == kInteractionRaycasts[interactionRaycastIndex].frame) {
                 const InteractionRaycastStep& step = kInteractionRaycasts[interactionRaycastIndex];
@@ -1011,7 +1021,11 @@ int main(int argc, char** argv) {
                     hasTarget = true;
                     const glm::vec3 min = glm::vec3(currentHit.block) - glm::vec3(kHighlightEpsilon);
                     const glm::vec3 max = glm::vec3(currentHit.block) + glm::vec3(1.0f + kHighlightEpsilon);
-                    debugDraw.UpdateCube(min, max);
+                    if (currentHit.normal == glm::ivec3(0)) {
+                        debugDraw.UpdateCube(min, max);
+                    } else {
+                        debugDraw.UpdateFace(min, max, currentHit.normal);
+                    }
                 }
             }
 
@@ -1359,6 +1373,16 @@ int main(int argc, char** argv) {
                 debugShader.setVec3("uColor", glm::vec3(1.0f, 0.95f, 0.2f));
                 // glLineWidth not available in current GLAD; default line width used.
                 debugDraw.Draw();
+            }
+
+            if (crosshairDraw.HasGeometry()) {
+                glDisable(GL_DEPTH_TEST);
+                debugShader.use();
+                debugShader.setMat4("uProjection", glm::mat4(1.0f));
+                debugShader.setMat4("uView", glm::mat4(1.0f));
+                debugShader.setVec3("uColor", glm::vec3(1.0f));
+                crosshairDraw.Draw();
+                glEnable(GL_DEPTH_TEST);
             }
         }
 
