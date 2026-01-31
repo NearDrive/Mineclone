@@ -19,6 +19,9 @@ ChunkStreaming::ChunkStreaming(const ChunkStreamingConfig& config) : config_(con
     if (config_.loadRadius < config_.renderRadius) {
         config_.loadRadius = config_.renderRadius;
     }
+    if (config_.minChunkY > config_.maxChunkY) {
+        std::swap(config_.minChunkY, config_.maxChunkY);
+    }
 }
 
 void ChunkStreaming::SetRenderRadius(int radius) {
@@ -107,20 +110,25 @@ bool ChunkStreaming::RequestRemesh(const ChunkCoord& coord, ChunkRegistry& regis
 
 void ChunkStreaming::BuildDesiredSet(const ChunkCoord& playerChunk) {
     const int radius = config_.loadRadius;
-    const std::size_t capacity = static_cast<std::size_t>((radius * 2 + 1) * (radius * 2 + 1));
+    const int minY = config_.minChunkY;
+    const int maxY = config_.maxChunkY;
+    const std::size_t layers = static_cast<std::size_t>(maxY - minY + 1);
+    const std::size_t capacity = static_cast<std::size_t>((radius * 2 + 1) * (radius * 2 + 1)) * layers;
     desiredCoords_.clear();
     desiredCoords_.reserve(capacity);
     desiredSet_.clear();
     desiredSet_.reserve(capacity);
 
-    for (int dz = -radius; dz <= radius; ++dz) {
-        for (int dx = -radius; dx <= radius; ++dx) {
-            if (std::max(std::abs(dx), std::abs(dz)) > radius) {
-                continue;
+    for (int dy = minY; dy <= maxY; ++dy) {
+        for (int dz = -radius; dz <= radius; ++dz) {
+            for (int dx = -radius; dx <= radius; ++dx) {
+                if (std::max(std::abs(dx), std::abs(dz)) > radius) {
+                    continue;
+                }
+                ChunkCoord coord{playerChunk.x + dx, playerChunk.y + dy, playerChunk.z + dz};
+                desiredCoords_.push_back(coord);
+                desiredSet_.insert(coord);
             }
-            ChunkCoord coord{playerChunk.x + dx, 0, playerChunk.z + dz};
-            desiredCoords_.push_back(coord);
-            desiredSet_.insert(coord);
         }
     }
 }
