@@ -203,6 +203,7 @@ struct AppMode::WorldRuntime {
     core::WorkerPool workerPool;
     game::Player player;
     DebugDraw debugDraw;
+    DebugDraw crosshairDraw;
 
     glm::mat4 projection{1.0f};
     glm::mat4 view{1.0f};
@@ -781,6 +782,15 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
     glfwGetFramebufferSize(window_, &width, &height);
     float aspect = width > 0 && height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 
+    constexpr float kCrosshairHalfSizePx = 6.0f;
+    if (width > 0 && height > 0) {
+        const float halfWidthNdc = kCrosshairHalfSizePx / (0.5f * static_cast<float>(width));
+        const float halfHeightNdc = kCrosshairHalfSizePx / (0.5f * static_cast<float>(height));
+        world_->crosshairDraw.UpdateCrosshair(halfWidthNdc, halfHeightNdc);
+    } else {
+        world_->crosshairDraw.Clear();
+    }
+
     world_->projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 500.0f);
     world_->view = gCamera.getViewMatrix();
     world_->frustum = Frustum::FromMatrix(world_->projection * world_->view);
@@ -796,7 +806,11 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
             world_->hasTarget = true;
             const glm::vec3 min = glm::vec3(world_->currentHit.block) - glm::vec3(kHighlightEpsilon);
             const glm::vec3 max = glm::vec3(world_->currentHit.block) + glm::vec3(1.0f + kHighlightEpsilon);
-            world_->debugDraw.UpdateCube(min, max);
+            if (world_->currentHit.normal == glm::ivec3(0)) {
+                world_->debugDraw.UpdateCube(min, max);
+            } else {
+                world_->debugDraw.UpdateFace(min, max, world_->currentHit.normal);
+            }
         }
     }
 
@@ -889,6 +903,16 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
         debugShader_.setMat4("uView", world_->view);
         debugShader_.setVec3("uColor", glm::vec3(1.0f, 0.95f, 0.2f));
         world_->debugDraw.Draw();
+    }
+
+    if (world_->crosshairDraw.HasGeometry()) {
+        glDisable(GL_DEPTH_TEST);
+        debugShader_.use();
+        debugShader_.setMat4("uProjection", glm::mat4(1.0f));
+        debugShader_.setMat4("uView", glm::mat4(1.0f));
+        debugShader_.setVec3("uColor", glm::vec3(1.0f));
+        world_->crosshairDraw.Draw();
+        glEnable(GL_DEPTH_TEST);
     }
 
     const voxel::ChunkStreamingStats& streamStats = world_->streaming.Stats();
