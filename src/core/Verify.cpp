@@ -142,6 +142,39 @@ void CheckEditNeighborRemesh(VerifyState& state) {
     Require(streaming.MeshQueue().size() == 2, "Expected two remesh jobs queued.", state);
 }
 
+void CheckMesherVerticalNeighbors(VerifyState& state) {
+    using namespace voxel;
+    ChunkRegistry registry;
+    ChunkMesher mesher;
+
+    ChunkCoord base{0, 0, 0};
+    ChunkCoord above{0, 1, 0};
+    auto baseEntry = registry.GetOrCreateEntry(base);
+    auto aboveEntry = registry.GetOrCreateEntry(above);
+
+    baseEntry->chunk = std::make_unique<Chunk>();
+    baseEntry->chunk->Fill(kBlockAir);
+    baseEntry->generationState.store(GenerationState::Ready, std::memory_order_release);
+
+    aboveEntry->chunk = std::make_unique<Chunk>();
+    aboveEntry->chunk->Fill(kBlockAir);
+    aboveEntry->generationState.store(GenerationState::Ready, std::memory_order_release);
+
+    baseEntry->chunk->Set(0, kChunkSize - 1, 0, kBlockStone);
+    aboveEntry->chunk->Set(0, 0, 0, kBlockStone);
+
+    ChunkMeshCpu mesh;
+    mesher.BuildMesh(base, *baseEntry->chunk, registry, mesh);
+
+    const std::size_t expectedFaces = 5;
+    const std::size_t expectedVertices = expectedFaces * 4;
+    const std::size_t expectedIndices = expectedFaces * 6;
+    Require(mesh.vertices.size() == expectedVertices,
+            "Mesher should hide +Y face when vertical neighbor is solid.", state);
+    Require(mesh.indices.size() == expectedIndices,
+            "Mesher index count mismatch for vertical neighbor face culling.", state);
+}
+
 void CheckPersistence(VerifyState& state, const VerifyOptions& options) {
     if (!options.enablePersistence) {
         return;
@@ -208,6 +241,7 @@ VerifyResult RunAll(const VerifyOptions& options) {
     CheckRegistryReadOnly(state);
     CheckRaycast(state);
     CheckEditNeighborRemesh(state);
+    CheckMesherVerticalNeighbors(state);
     CheckJobScheduling(state);
     CheckPersistence(state, options);
     CheckWorkerPoolShutdown(state);
