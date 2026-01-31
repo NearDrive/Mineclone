@@ -19,9 +19,7 @@ ChunkStreaming::ChunkStreaming(const ChunkStreamingConfig& config) : config_(con
     if (config_.loadRadius < config_.renderRadius) {
         config_.loadRadius = config_.renderRadius;
     }
-    if (config_.minChunkY > config_.maxChunkY) {
-        std::swap(config_.minChunkY, config_.maxChunkY);
-    }
+    config_.verticalRadius = std::max(0, config_.verticalRadius);
 }
 
 void ChunkStreaming::SetRenderRadius(int radius) {
@@ -110,8 +108,8 @@ bool ChunkStreaming::RequestRemesh(const ChunkCoord& coord, ChunkRegistry& regis
 
 void ChunkStreaming::BuildDesiredSet(const ChunkCoord& playerChunk) {
     const int radius = config_.loadRadius;
-    const int minY = config_.minChunkY;
-    const int maxY = config_.maxChunkY;
+    const int minY = playerChunk.y - config_.verticalRadius;
+    const int maxY = playerChunk.y + config_.verticalRadius;
     const std::size_t layers = static_cast<std::size_t>(maxY - minY + 1);
     const std::size_t capacity = static_cast<std::size_t>((radius * 2 + 1) * (radius * 2 + 1)) * layers;
     desiredCoords_.clear();
@@ -125,7 +123,7 @@ void ChunkStreaming::BuildDesiredSet(const ChunkCoord& playerChunk) {
                 if (std::max(std::abs(dx), std::abs(dz)) > radius) {
                     continue;
                 }
-                ChunkCoord coord{playerChunk.x + dx, playerChunk.y + dy, playerChunk.z + dz};
+                ChunkCoord coord{playerChunk.x + dx, dy, playerChunk.z + dz};
                 desiredCoords_.push_back(coord);
                 desiredSet_.insert(coord);
             }
@@ -153,8 +151,9 @@ void ChunkStreaming::UnloadOutOfRange(ChunkRegistry& registry) {
 }
 
 void ChunkStreaming::EnqueueMissing(ChunkRegistry& registry) {
-    int createBudget = config_.maxChunkCreatesPerFrame;
-    int meshBudget = config_.maxChunkMeshesPerFrame;
+    const int layerCount = config_.verticalRadius * 2 + 1;
+    int createBudget = config_.maxChunkCreatesPerFrame * layerCount;
+    int meshBudget = config_.maxChunkMeshesPerFrame * layerCount;
 
     for (const ChunkCoord& coord : desiredCoords_) {
         auto entry = registry.GetOrCreateEntry(coord);
