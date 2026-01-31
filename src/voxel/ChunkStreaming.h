@@ -21,6 +21,8 @@ class ChunkRegistry;
 struct ChunkStreamingConfig {
     int loadRadius = 10;
     int renderRadius = 8;
+    int minChunkY = -2;
+    int maxChunkY = 2;
     int maxChunkCreatesPerFrame = 3;
     int maxChunkMeshesPerFrame = 2;
     int maxGpuUploadsPerFrame = 3;
