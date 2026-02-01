@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <iostream>
 #include <shared_mutex>
+#include <vector>
 
 #include "core/WorkerPool.h"
 #include "persistence/ChunkStorage.h"
@@ -24,12 +25,31 @@ namespace {
 struct VerifyState {
     bool ok = true;
     std::string message;
+    std::vector<std::string> failures;
 };
 
 void Require(bool condition, const std::string& message, VerifyState& state) {
-    if (!condition && state.ok) {
-        state.ok = false;
-        state.message = message;
+    if (!condition) {
+        std::cout << "[Verify] FAIL: " << message << '\n';
+        state.failures.push_back(message);
+        if (state.ok) {
+            state.ok = false;
+            state.message = message;
+        }
+    }
+}
+
+template <typename CheckFn>
+void RunCheck(const char* label, CheckFn&& fn, VerifyState& state) {
+    std::cout << "[Verify] Begin: " << label << '\n';
+    const std::size_t failuresBefore = state.failures.size();
+    fn(state);
+    const std::size_t failuresAfter = state.failures.size();
+    if (failuresAfter == failuresBefore) {
+        std::cout << "[Verify] OK: " << label << '\n';
+    } else {
+        std::cout << "[Verify] DONE: " << label << " (" << (failuresAfter - failuresBefore)
+                  << " failure(s))\n";
     }
 }
 
@@ -248,20 +268,22 @@ void CheckWorkerPoolShutdown(VerifyState& state) {
 
 VerifyResult RunAll(const VerifyOptions& options) {
     VerifyState state;
-    CheckVoxelCoords(state);
-    CheckChunkIndexing(state);
-    CheckRegistryReadOnly(state);
-    CheckRaycast(state);
-    CheckEditNeighborRemesh(state);
-    CheckMesherVerticalNeighbors(state);
-    CheckJobScheduling(state);
-    CheckPersistence(state, options);
-    CheckWorkerPoolShutdown(state);
+    std::cout << "[Verify] Starting checks.\n";
+    RunCheck("VoxelCoords", CheckVoxelCoords, state);
+    RunCheck("ChunkIndexing", CheckChunkIndexing, state);
+    RunCheck("RegistryReadOnly", CheckRegistryReadOnly, state);
+    RunCheck("Raycast", CheckRaycast, state);
+    RunCheck("EditNeighborRemesh", CheckEditNeighborRemesh, state);
+    RunCheck("MesherVerticalNeighbors", CheckMesherVerticalNeighbors, state);
+    RunCheck("JobScheduling", CheckJobScheduling, state);
+    RunCheck("Persistence", [&](VerifyState& checkState) { CheckPersistence(checkState, options); }, state);
+    RunCheck("WorkerPoolShutdown", CheckWorkerPoolShutdown, state);
 
     if (state.ok) {
         std::cout << "[Verify] All checks passed.\n";
     } else {
         std::cout << "[Verify] Failed: " << state.message << '\n';
+        std::cout << "[Verify] Total failures: " << state.failures.size() << '\n';
     }
 
     return VerifyResult{state.ok, state.message};

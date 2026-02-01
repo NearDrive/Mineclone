@@ -403,6 +403,7 @@ AppMode::AppMode(GLFWwindow* window, const AppModeOptions& options)
         InitializeTextures();
     }
     if (initialized_) {
+        state_ = GameState::Exiting;
         SetState(GameState::MainMenu);
     }
 }
