@@ -69,8 +69,18 @@ int SampleHeight(int x, int z) {
 
 } // namespace
 
+int GetSurfaceHeight(int x, int z) {
+    return SampleHeight(x, z);
+}
+
 BlockId SampleFlatWorld(const WorldBlockCoord& coord) {
-    const int height = SampleHeight(coord.x, coord.z);
+    if (coord.y >= kWorldMaxY) {
+        return kBlockAir;
+    }
+    if (coord.y <= kWorldMinY) {
+        return kBlockStone;
+    }
+    const int height = GetSurfaceHeight(coord.x, coord.z);
     if (coord.y > height) {
         return kBlockAir;
     }

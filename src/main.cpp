@@ -53,6 +53,7 @@
 #include "voxel/ChunkStreaming.h"
 #include "voxel/BlockEdit.h"
 #include "voxel/Raycast.h"
+#include "voxel/WorldGen.h"
 #include "voxel/VoxelCoords.h"
 
 namespace {
@@ -162,7 +163,11 @@ constexpr int kSoakLoadRadius = 6;
 constexpr int kSoakWorkerThreads = 1;
 constexpr int kSoakSyncMaxIterations = 200;
 const glm::vec3 kInteractionMoveDir(-2.0f, 0.0f, -2.0f);
-const glm::vec3 kPlayerSpawn(0.0f, 20.0f, 0.0f);
+const glm::vec3 kPlayerSpawn = []() {
+    const int surfaceHeight = voxel::GetSurfaceHeight(0, 0);
+    const int spawnY = std::clamp(surfaceHeight + 2, voxel::kWorldMinY + 2, voxel::kWorldMaxY - 2);
+    return glm::vec3(0.0f, static_cast<float>(spawnY), 0.0f);
+}();
 const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
 
 void glfwErrorCallback(int error, const char* description) {
