@@ -9,7 +9,7 @@ namespace voxel {
 
 class ChunkMesher {
 public:
-    void BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const ChunkRegistry& registry,
+    void BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRegistry& registry,
                    ChunkMeshCpu& mesh) const;
 };
 

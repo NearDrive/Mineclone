@@ -48,7 +48,7 @@ LightReadHandle AcquireLightRead(const ChunkCoord& coord, const ChunkRegistry& r
 
 } // namespace
 
-void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const ChunkRegistry& registry,
+void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRegistry& registry,
                             ChunkMeshCpu& mesh) const {
     mesh.Clear();
 
