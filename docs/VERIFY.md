@@ -40,6 +40,36 @@ In CI or headless setups, disable GL debug output:
 ./build-debug/Mineclone --smoke-test --no-gl-debug
 ```
 
+## Visual Validation
+
+Use these scenarios to validate lighting and shadowing visually. Compare the on-screen result
+to the expected light levels listed below and confirm there are no obvious artifacts (banding,
+flicker, incorrect shadow edges, or stale lighting after edits).
+
+### Test Scenes
+
+1. **Tall tower in sunlight + shadows**
+   - Build a tall, narrow tower in an open area under direct sunlight.
+   - Expected: clear light falloff with crisp shadow projection on nearby terrain.
+
+2. **Sealed cave with torches**
+   - Create a fully enclosed cave, then place torches inside.
+   - Expected: cave interior is dark without torches; torch light provides smooth falloff with
+     no light leaking through solid blocks.
+
+3. **Real-time editing (add/remove blocks)**
+   - While observing lighting, add and remove blocks near light sources and shadows.
+   - Expected: lighting updates immediately, with no lingering bright/dark patches.
+
+4. **Compare against expected light levels**
+   - Sample light values (if displayed/debuggable) in bright, mid, and dark regions.
+   - Expected: values match the intended lighting model and remain consistent across frames.
+
+### Expected Result
+
+Visual validation is considered successful when lighting and shadows appear consistent and
+artifact-free across the scenarios above.
+
 ## Menu Controls
 
 Main menu (on startup):
