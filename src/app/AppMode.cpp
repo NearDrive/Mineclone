@@ -34,6 +34,7 @@
 #include "voxel/ChunkBounds.h"
 #include "voxel/Raycast.h"
 #include "voxel/VoxelCoords.h"
+#include "voxel/WorldGen.h"
 
 namespace app {
 
@@ -52,7 +53,11 @@ constexpr float kSmokeDeltaTime = 1.0f / 60.0f;
 constexpr int kWorkerThreadsDefault = 2;
 constexpr int kSmokeMenuWorldFrames = 60;
 constexpr std::string_view kWorldPrefix = "world_";
-const glm::vec3 kPlayerSpawn(0.0f, 20.0f, 0.0f);
+const glm::vec3 kPlayerSpawn = []() {
+    const int surfaceHeight = voxel::GetSurfaceHeight(0, 0);
+    const int spawnY = std::clamp(surfaceHeight + 2, voxel::kWorldMinY + 2, voxel::kWorldMaxY - 2);
+    return glm::vec3(0.0f, static_cast<float>(spawnY), 0.0f);
+}();
 const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
 
 GLuint CreateTextureFromPixels(int width, int height, const std::vector<std::uint8_t>& pixels) {

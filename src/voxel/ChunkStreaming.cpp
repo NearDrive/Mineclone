@@ -12,6 +12,8 @@
 
 #include "voxel/ChunkMesher.h"
 #include "voxel/ChunkRegistry.h"
+#include "voxel/VoxelCoords.h"
+#include "voxel/WorldGen.h"
 
 namespace voxel {
 
@@ -108,8 +110,11 @@ bool ChunkStreaming::RequestRemesh(const ChunkCoord& coord, ChunkRegistry& regis
 
 void ChunkStreaming::BuildDesiredSet(const ChunkCoord& playerChunk) {
     const int radius = config_.loadRadius;
-    const int minY = playerChunk.y - config_.verticalRadius;
-    const int maxY = playerChunk.y + config_.verticalRadius;
+    const int minChunkY = WorldToChunkCoord(WorldBlockCoord{0, kWorldMinY, 0}, kChunkSize).y;
+    const int maxChunkY = WorldToChunkCoord(WorldBlockCoord{0, kWorldMaxY, 0}, kChunkSize).y;
+    const int clampedPlayerY = std::clamp(playerChunk.y, minChunkY, maxChunkY);
+    const int minY = std::max(clampedPlayerY - config_.verticalRadius, minChunkY);
+    const int maxY = std::min(clampedPlayerY + config_.verticalRadius, maxChunkY);
     const std::size_t layers = static_cast<std::size_t>(maxY - minY + 1);
     const std::size_t capacity = static_cast<std::size_t>((radius * 2 + 1) * (radius * 2 + 1)) * layers;
     desiredCoords_.clear();
