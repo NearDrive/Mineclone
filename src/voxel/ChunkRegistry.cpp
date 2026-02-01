@@ -3,13 +3,80 @@
 #include <atomic>
 #include <chrono>
 #include <iostream>
+#include <queue>
 #include <shared_mutex>
 #include <utility>
+#include <vector>
 
 #include "persistence/ChunkStorage.h"
 #include "voxel/WorldGen.h"
 
 namespace voxel {
+
+namespace {
+
+bool IsOpaque(BlockId id) {
+    switch (id) {
+    case kBlockAir:
+    case kBlockTorch:
+        return false;
+    default:
+        return true;
+    }
+}
+
+std::uint8_t EmissiveLevel(BlockId id) {
+    switch (id) {
+    case kBlockTorch:
+        return 14;
+    case kBlockLava:
+        return kLightMax;
+    default:
+        return kLightMin;
+    }
+}
+
+struct LightCoord {
+    int x;
+    int y;
+    int z;
+};
+
+struct SunlightVolume {
+    int size = kChunkSize + 2;
+    int baseX = 0;
+    int baseY = 0;
+    int baseZ = 0;
+    std::vector<std::uint8_t> light;
+    std::vector<std::uint8_t> opaque;
+
+    std::size_t Index(int lx, int ly, int lz) const {
+        return static_cast<std::size_t>(lx + size * (ly + size * lz));
+    }
+
+    bool InBounds(int lx, int ly, int lz) const {
+        return lx >= 0 && lx < size && ly >= 0 && ly < size && lz >= 0 && lz < size;
+    }
+};
+
+struct EmissiveVolume {
+    int size = kChunkSize + 2;
+    int baseX = 0;
+    int baseY = 0;
+    int baseZ = 0;
+    std::vector<std::uint8_t> light;
+    std::vector<std::uint8_t> opaque;
+
+    std::size_t Index(int lx, int ly, int lz) const {
+        return static_cast<std::size_t>(lx + size * (ly + size * lz));
+    }
+
+    bool InBounds(int lx, int ly, int lz) const {
+        return lx >= 0 && lx < size && ly >= 0 && ly < size && lz >= 0 && lz < size;
+    }
+};
+
+} // namespace
 
 std::shared_ptr<ChunkEntry> ChunkRegistry::GetOrCreateEntry(const ChunkCoord& coord) {
     std::lock_guard<std::mutex> lock(entriesMutex_);
@@ -234,6 +301,229 @@ void ChunkRegistry::SetBlock(const WorldBlockCoord& world, BlockId id) {
     }
     entry->chunk->Set(local.x, local.y, local.z, id);
     entry->dirty.store(true, std::memory_order_release);
+    entry->lightDirty.store(true, std::memory_order_release);
+    entry->lightReady.store(false, std::memory_order_release);
+}
+
+void ChunkRegistry::EnsureLightForChunk(const ChunkCoord& coord) {
+    auto entry = TryGetEntry(coord);
+    if (!entry) {
+        return;
+    }
+    if (entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
+        return;
+    }
+    if (!entry->chunk) {
+        return;
+    }
+    if (!entry->lightDirty.load(std::memory_order_acquire) && entry->lightReady.load(std::memory_order_acquire)) {
+        return;
+    }
+    RebuildLightForChunk(coord);
+}
+
+void ChunkRegistry::EnsureLightForNeighborhood(const ChunkCoord& coord) {
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                EnsureLightForChunk({coord.x + dx, coord.y + dy, coord.z + dz});
+            }
+        }
+    }
+}
+
+void ChunkRegistry::RebuildLightForChunk(const ChunkCoord& coord) {
+    auto entry = TryGetEntry(coord);
+    if (!entry) {
+        return;
+    }
+    if (entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
+        return;
+    }
+
+    std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
+    const Chunk* chunk = entry->chunk.get();
+    if (!chunk) {
+        return;
+    }
+
+    const int chunkBaseX = coord.x * kChunkSize;
+    const int chunkBaseY = coord.y * kChunkSize;
+    const int chunkBaseZ = coord.z * kChunkSize;
+
+    auto sampleBlock = [&](const WorldBlockCoord& world) -> BlockId {
+        if (world.x >= chunkBaseX && world.x < chunkBaseX + kChunkSize &&
+            world.y >= chunkBaseY && world.y < chunkBaseY + kChunkSize &&
+            world.z >= chunkBaseZ && world.z < chunkBaseZ + kChunkSize) {
+            const LocalCoord local = WorldToLocalCoord(world, kChunkSize);
+            return chunk->Get(local.x, local.y, local.z);
+        }
+        return GetBlock(world);
+    };
+
+    SunlightVolume sunlight;
+    const int volumeSize = sunlight.size;
+    const std::size_t volumeCount = static_cast<std::size_t>(volumeSize * volumeSize * volumeSize);
+    sunlight.light.assign(volumeCount, kLightMin);
+    sunlight.opaque.assign(volumeCount, 0);
+    sunlight.baseX = chunkBaseX - 1;
+    sunlight.baseY = chunkBaseY - 1;
+    sunlight.baseZ = chunkBaseZ - 1;
+
+    for (int z = 0; z < volumeSize; ++z) {
+        for (int y = 0; y < volumeSize; ++y) {
+            for (int x = 0; x < volumeSize; ++x) {
+                WorldBlockCoord world{sunlight.baseX + x, sunlight.baseY + y, sunlight.baseZ + z};
+                if (IsOpaque(sampleBlock(world))) {
+                    sunlight.opaque[sunlight.Index(x, y, z)] = 1;
+                }
+            }
+        }
+    }
+
+    const int minWorldY = sunlight.baseY;
+    const int maxWorldY = sunlight.baseY + volumeSize - 1;
+
+    for (int z = 0; z < volumeSize; ++z) {
+        for (int x = 0; x < volumeSize; ++x) {
+            const int worldX = sunlight.baseX + x;
+            const int worldZ = sunlight.baseZ + z;
+            bool blocked = false;
+            for (int worldY = kWorldMaxY - 1; worldY >= kWorldMinY; --worldY) {
+                WorldBlockCoord world{worldX, worldY, worldZ};
+                BlockId block = sampleBlock(world);
+                if (IsOpaque(block)) {
+                    blocked = true;
+                }
+                if (worldY < minWorldY || worldY > maxWorldY) {
+                    continue;
+                }
+                const int localY = worldY - sunlight.baseY;
+                const std::size_t idx = sunlight.Index(x, localY, z);
+                if (!blocked && !IsOpaque(block)) {
+                    sunlight.light[idx] = kLightMax;
+                } else {
+                    sunlight.light[idx] = kLightMin;
+                }
+            }
+        }
+    }
+
+    std::queue<LightCoord> queue;
+    for (int z = 0; z < volumeSize; ++z) {
+        for (int y = 0; y < volumeSize; ++y) {
+            for (int x = 0; x < volumeSize; ++x) {
+                if (sunlight.light[sunlight.Index(x, y, z)] > kLightMin) {
+                    queue.push({x, y, z});
+                }
+            }
+        }
+    }
+
+    const LightCoord offsets[] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+
+    while (!queue.empty()) {
+        LightCoord current = queue.front();
+        queue.pop();
+        const std::uint8_t level = sunlight.light[sunlight.Index(current.x, current.y, current.z)];
+        if (level <= kLightMin + 1) {
+            continue;
+        }
+        const std::uint8_t nextLevel = static_cast<std::uint8_t>(level - 1);
+        for (const LightCoord& offset : offsets) {
+            const int nx = current.x + offset.x;
+            const int ny = current.y + offset.y;
+            const int nz = current.z + offset.z;
+            if (!sunlight.InBounds(nx, ny, nz)) {
+                continue;
+            }
+            const std::size_t nidx = sunlight.Index(nx, ny, nz);
+            if (sunlight.opaque[nidx] != 0) {
+                continue;
+            }
+            if (nextLevel > sunlight.light[nidx]) {
+                sunlight.light[nidx] = nextLevel;
+                queue.push({nx, ny, nz});
+            }
+        }
+    }
+
+    EmissiveVolume emissive;
+    emissive.light.assign(volumeCount, kLightMin);
+    emissive.opaque.assign(volumeCount, 0);
+    emissive.baseX = sunlight.baseX;
+    emissive.baseY = sunlight.baseY;
+    emissive.baseZ = sunlight.baseZ;
+
+    for (int z = 0; z < volumeSize; ++z) {
+        for (int y = 0; y < volumeSize; ++y) {
+            for (int x = 0; x < volumeSize; ++x) {
+                WorldBlockCoord world{emissive.baseX + x, emissive.baseY + y, emissive.baseZ + z};
+                BlockId block = sampleBlock(world);
+                const std::size_t idx = emissive.Index(x, y, z);
+                if (IsOpaque(block)) {
+                    emissive.opaque[idx] = 1;
+                }
+                const std::uint8_t level = EmissiveLevel(block);
+                if (level > kLightMin) {
+                    emissive.light[idx] = level;
+                    queue.push({x, y, z});
+                }
+            }
+        }
+    }
+
+    while (!queue.empty()) {
+        LightCoord current = queue.front();
+        queue.pop();
+        const std::uint8_t level = emissive.light[emissive.Index(current.x, current.y, current.z)];
+        if (level <= kLightMin + 1) {
+            continue;
+        }
+        const std::uint8_t nextLevel = static_cast<std::uint8_t>(level - 1);
+        for (const LightCoord& offset : offsets) {
+            const int nx = current.x + offset.x;
+            const int ny = current.y + offset.y;
+            const int nz = current.z + offset.z;
+            if (!emissive.InBounds(nx, ny, nz)) {
+                continue;
+            }
+            const std::size_t nidx = emissive.Index(nx, ny, nz);
+            if (emissive.opaque[nidx] != 0) {
+                continue;
+            }
+            if (nextLevel > emissive.light[nidx]) {
+                emissive.light[nidx] = nextLevel;
+                queue.push({nx, ny, nz});
+            }
+        }
+    }
+
+    for (int z = 0; z < kChunkSize; ++z) {
+        for (int y = 0; y < kChunkSize; ++y) {
+            for (int x = 0; x < kChunkSize; ++x) {
+                const int vx = x + 1;
+                const int vy = y + 1;
+                const int vz = z + 1;
+                const std::size_t vidx = sunlight.Index(vx, vy, vz);
+                entry->light.SetSunlight(x, y, z, sunlight.light[vidx]);
+                entry->light.SetEmissive(x, y, z, emissive.light[vidx]);
+            }
+        }
+    }
+
+    entry->lightDirty.store(false, std::memory_order_release);
+    entry->lightReady.store(true, std::memory_order_release);
+}
+
+void ChunkRegistry::RebuildLightForNeighborhood(const ChunkCoord& coord) {
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                RebuildLightForChunk({coord.x + dx, coord.y + dy, coord.z + dz});
+            }
+        }
+    }
 }
 
 std::size_t ChunkRegistry::LoadedCount() const {

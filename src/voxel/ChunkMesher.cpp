@@ -1,7 +1,7 @@
 #include "voxel/ChunkMesher.h"
 
 #include <cassert>
-#include <queue>
+#include <shared_mutex>
 #include <vector>
 
 #include "voxel/BlockFaces.h"
@@ -26,217 +26,24 @@ glm::vec2 AtlasUv(BlockId id, const glm::vec2& uv) {
     return glm::vec2{uv.x * kAtlasTileWidth + offset, uv.y};
 }
 
-bool IsOpaque(BlockId id) {
-    switch (id) {
-    case kBlockAir:
-    case kBlockTorch:
-        return false;
-    default:
-        return true;
-    }
-}
+struct LightReadHandle {
+    std::shared_ptr<const ChunkEntry> entry;
+    std::shared_lock<std::shared_mutex> lock;
+    const LightChunk* light = nullptr;
 
-std::uint8_t EmissiveLevel(BlockId id) {
-    switch (id) {
-    case kBlockTorch:
-        return 14;
-    case kBlockLava:
-        return kLightMax;
-    default:
-        return kLightMin;
-    }
-}
-
-struct LightCoord {
-    int x;
-    int y;
-    int z;
+    explicit operator bool() const { return light != nullptr; }
 };
 
-struct SunlightVolume {
-    int size = kChunkSize + 2;
-    int baseX = 0;
-    int baseY = 0;
-    int baseZ = 0;
-    std::vector<std::uint8_t> light;
-    std::vector<std::uint8_t> opaque;
-
-    std::size_t Index(int lx, int ly, int lz) const {
-        return static_cast<std::size_t>(lx + size * (ly + size * lz));
+LightReadHandle AcquireLightRead(const ChunkCoord& coord, const ChunkRegistry& registry) {
+    LightReadHandle handle;
+    auto entry = registry.TryGetEntry(coord);
+    if (!entry || !entry->lightReady.load(std::memory_order_acquire)) {
+        return handle;
     }
-
-    bool InBounds(int lx, int ly, int lz) const {
-        return lx >= 0 && lx < size && ly >= 0 && ly < size && lz >= 0 && lz < size;
-    }
-};
-
-struct EmissiveVolume {
-    int size = kChunkSize + 2;
-    int baseX = 0;
-    int baseY = 0;
-    int baseZ = 0;
-    std::vector<std::uint8_t> light;
-    std::vector<std::uint8_t> opaque;
-
-    std::size_t Index(int lx, int ly, int lz) const {
-        return static_cast<std::size_t>(lx + size * (ly + size * lz));
-    }
-
-    bool InBounds(int lx, int ly, int lz) const {
-        return lx >= 0 && lx < size && ly >= 0 && ly < size && lz >= 0 && lz < size;
-    }
-};
-
-SunlightVolume BuildSunlightVolume(const ChunkCoord& coord, const ChunkRegistry& registry) {
-    SunlightVolume volume;
-    const int volumeSize = volume.size;
-    const std::size_t volumeCount = static_cast<std::size_t>(volumeSize * volumeSize * volumeSize);
-    volume.light.assign(volumeCount, kLightMin);
-    volume.opaque.assign(volumeCount, 0);
-
-    volume.baseX = coord.x * kChunkSize - 1;
-    volume.baseY = coord.y * kChunkSize - 1;
-    volume.baseZ = coord.z * kChunkSize - 1;
-
-    for (int z = 0; z < volumeSize; ++z) {
-        for (int y = 0; y < volumeSize; ++y) {
-            for (int x = 0; x < volumeSize; ++x) {
-                WorldBlockCoord world{volume.baseX + x, volume.baseY + y, volume.baseZ + z};
-                if (IsOpaque(registry.GetBlock(world))) {
-                    volume.opaque[volume.Index(x, y, z)] = 1;
-                }
-            }
-        }
-    }
-
-    const int minWorldY = volume.baseY;
-    const int maxWorldY = volume.baseY + volumeSize - 1;
-
-    for (int z = 0; z < volumeSize; ++z) {
-        for (int x = 0; x < volumeSize; ++x) {
-            const int worldX = volume.baseX + x;
-            const int worldZ = volume.baseZ + z;
-            bool blocked = false;
-            for (int worldY = kWorldMaxY - 1; worldY >= kWorldMinY; --worldY) {
-                BlockId block = registry.GetBlock(WorldBlockCoord{worldX, worldY, worldZ});
-                if (IsOpaque(block)) {
-                    blocked = true;
-                }
-                if (worldY < minWorldY || worldY > maxWorldY) {
-                    continue;
-                }
-                const int localY = worldY - volume.baseY;
-                const std::size_t idx = volume.Index(x, localY, z);
-                if (!blocked && !IsOpaque(block)) {
-                    volume.light[idx] = kLightMax;
-                } else {
-                    volume.light[idx] = kLightMin;
-                }
-            }
-        }
-    }
-
-    std::queue<LightCoord> queue;
-    for (int z = 0; z < volumeSize; ++z) {
-        for (int y = 0; y < volumeSize; ++y) {
-            for (int x = 0; x < volumeSize; ++x) {
-                if (volume.light[volume.Index(x, y, z)] > kLightMin) {
-                    queue.push({x, y, z});
-                }
-            }
-        }
-    }
-
-    const LightCoord offsets[] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-
-    while (!queue.empty()) {
-        LightCoord current = queue.front();
-        queue.pop();
-        const std::uint8_t level = volume.light[volume.Index(current.x, current.y, current.z)];
-        if (level <= kLightMin + 1) {
-            continue;
-        }
-        const std::uint8_t nextLevel = static_cast<std::uint8_t>(level - 1);
-        for (const LightCoord& offset : offsets) {
-            const int nx = current.x + offset.x;
-            const int ny = current.y + offset.y;
-            const int nz = current.z + offset.z;
-            if (!volume.InBounds(nx, ny, nz)) {
-                continue;
-            }
-            const std::size_t nidx = volume.Index(nx, ny, nz);
-            if (volume.opaque[nidx] != 0) {
-                continue;
-            }
-            if (nextLevel > volume.light[nidx]) {
-                volume.light[nidx] = nextLevel;
-                queue.push({nx, ny, nz});
-            }
-        }
-    }
-
-    return volume;
-}
-
-EmissiveVolume BuildEmissiveVolume(const ChunkCoord& coord, const ChunkRegistry& registry) {
-    EmissiveVolume volume;
-    const int volumeSize = volume.size;
-    const std::size_t volumeCount = static_cast<std::size_t>(volumeSize * volumeSize * volumeSize);
-    volume.light.assign(volumeCount, kLightMin);
-    volume.opaque.assign(volumeCount, 0);
-
-    volume.baseX = coord.x * kChunkSize - 1;
-    volume.baseY = coord.y * kChunkSize - 1;
-    volume.baseZ = coord.z * kChunkSize - 1;
-
-    std::queue<LightCoord> queue;
-    for (int z = 0; z < volumeSize; ++z) {
-        for (int y = 0; y < volumeSize; ++y) {
-            for (int x = 0; x < volumeSize; ++x) {
-                WorldBlockCoord world{volume.baseX + x, volume.baseY + y, volume.baseZ + z};
-                BlockId block = registry.GetBlock(world);
-                const std::size_t idx = volume.Index(x, y, z);
-                if (IsOpaque(block)) {
-                    volume.opaque[idx] = 1;
-                }
-                const std::uint8_t emissive = EmissiveLevel(block);
-                if (emissive > kLightMin) {
-                    volume.light[idx] = emissive;
-                    queue.push({x, y, z});
-                }
-            }
-        }
-    }
-
-    const LightCoord offsets[] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
-
-    while (!queue.empty()) {
-        LightCoord current = queue.front();
-        queue.pop();
-        const std::uint8_t level = volume.light[volume.Index(current.x, current.y, current.z)];
-        if (level <= kLightMin + 1) {
-            continue;
-        }
-        const std::uint8_t nextLevel = static_cast<std::uint8_t>(level - 1);
-        for (const LightCoord& offset : offsets) {
-            const int nx = current.x + offset.x;
-            const int ny = current.y + offset.y;
-            const int nz = current.z + offset.z;
-            if (!volume.InBounds(nx, ny, nz)) {
-                continue;
-            }
-            const std::size_t nidx = volume.Index(nx, ny, nz);
-            if (volume.opaque[nidx] != 0) {
-                continue;
-            }
-            if (nextLevel > volume.light[nidx]) {
-                volume.light[nidx] = nextLevel;
-                queue.push({nx, ny, nz});
-            }
-        }
-    }
-
-    return volume;
+    handle.entry = entry;
+    handle.lock = std::shared_lock<std::shared_mutex>(entry->dataMutex);
+    handle.light = &entry->light;
+    return handle;
 }
 
 } // namespace
@@ -258,8 +65,20 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const C
     auto neighborPosZ = registry.AcquireChunkRead({coord.x, coord.y, coord.z + 1});
     auto neighborNegZ = registry.AcquireChunkRead({coord.x, coord.y, coord.z - 1});
 
-    SunlightVolume sunlight = BuildSunlightVolume(coord, registry);
-    EmissiveVolume emissive = BuildEmissiveVolume(coord, registry);
+    registry.EnsureLightForNeighborhood(coord);
+
+    auto lightEntry = registry.TryGetEntry(coord);
+    const LightChunk* currentLight = nullptr;
+    if (lightEntry && lightEntry->lightReady.load(std::memory_order_acquire)) {
+        currentLight = &lightEntry->light;
+    }
+
+    LightReadHandle lightPosX = AcquireLightRead({coord.x + 1, coord.y, coord.z}, registry);
+    LightReadHandle lightNegX = AcquireLightRead({coord.x - 1, coord.y, coord.z}, registry);
+    LightReadHandle lightPosY = AcquireLightRead({coord.x, coord.y + 1, coord.z}, registry);
+    LightReadHandle lightNegY = AcquireLightRead({coord.x, coord.y - 1, coord.z}, registry);
+    LightReadHandle lightPosZ = AcquireLightRead({coord.x, coord.y, coord.z + 1}, registry);
+    LightReadHandle lightNegZ = AcquireLightRead({coord.x, coord.y, coord.z - 1}, registry);
 
     auto sampleNeighbor = [&](int nx, int ny, int nz) -> BlockId {
         if (nx >= 0 && nx < kChunkSize && ny >= 0 && ny < kChunkSize && nz >= 0 && nz < kChunkSize) {
@@ -292,25 +111,45 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const C
         return kBlockAir;
     };
 
-    auto sampleSunlight = [&](int nx, int ny, int nz) -> float {
-        const int lx = nx + 1;
-        const int ly = ny + 1;
-        const int lz = nz + 1;
-        if (!sunlight.InBounds(lx, ly, lz)) {
-            return 0.0f;
+    auto sampleLight = [&](int nx, int ny, int nz, bool sunlight) -> float {
+        const LightChunk* light = nullptr;
+        int lx = nx;
+        int ly = ny;
+        int lz = nz;
+        if (nx >= 0 && nx < kChunkSize && ny >= 0 && ny < kChunkSize && nz >= 0 && nz < kChunkSize) {
+            light = currentLight;
+        } else {
+            const int outX = nx < 0 || nx >= kChunkSize;
+            const int outY = ny < 0 || ny >= kChunkSize;
+            const int outZ = nz < 0 || nz >= kChunkSize;
+            if ((outX + outY + outZ) != 1) {
+                return 0.0f;
+            }
+            if (nx < 0) {
+                light = lightNegX.light;
+                lx = nx + kChunkSize;
+            } else if (nx >= kChunkSize) {
+                light = lightPosX.light;
+                lx = nx - kChunkSize;
+            } else if (ny < 0) {
+                light = lightNegY.light;
+                ly = ny + kChunkSize;
+            } else if (ny >= kChunkSize) {
+                light = lightPosY.light;
+                ly = ny - kChunkSize;
+            } else if (nz < 0) {
+                light = lightNegZ.light;
+                lz = nz + kChunkSize;
+            } else if (nz >= kChunkSize) {
+                light = lightPosZ.light;
+                lz = nz - kChunkSize;
+            }
         }
-        const std::uint8_t level = sunlight.light[sunlight.Index(lx, ly, lz)];
-        return static_cast<float>(level) / static_cast<float>(kLightMax);
-    };
 
-    auto sampleEmissive = [&](int nx, int ny, int nz) -> float {
-        const int lx = nx + 1;
-        const int ly = ny + 1;
-        const int lz = nz + 1;
-        if (!emissive.InBounds(lx, ly, lz)) {
+        if (!light) {
             return 0.0f;
         }
-        const std::uint8_t level = emissive.light[emissive.Index(lx, ly, lz)];
+        const std::uint8_t level = sunlight ? light->Sunlight(lx, ly, lz) : light->Emissive(lx, ly, lz);
         return static_cast<float>(level) / static_cast<float>(kLightMax);
     };
 
@@ -334,8 +173,8 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const C
                         continue;
                     }
 
-                    const float faceSunlight = sampleSunlight(nx, ny, nz);
-                    const float faceEmissive = sampleEmissive(nx, ny, nz);
+                    const float faceSunlight = sampleLight(nx, ny, nz, true);
+                    const float faceEmissive = sampleLight(nx, ny, nz, false);
                     std::uint32_t baseIndex = static_cast<std::uint32_t>(vertices.size());
                     for (std::size_t i = 0; i < face.vertices.size(); ++i) {
                         const glm::vec3& vertex = face.vertices[i];
