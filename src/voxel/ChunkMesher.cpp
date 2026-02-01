@@ -58,14 +58,14 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRe
     auto& vertices = mesh.vertices;
     auto& indices = mesh.indices;
 
+    registry.EnsureLightForNeighborhood(coord);
+
     auto neighborPosX = registry.AcquireChunkRead({coord.x + 1, coord.y, coord.z});
     auto neighborNegX = registry.AcquireChunkRead({coord.x - 1, coord.y, coord.z});
     auto neighborPosY = registry.AcquireChunkRead({coord.x, coord.y + 1, coord.z});
     auto neighborNegY = registry.AcquireChunkRead({coord.x, coord.y - 1, coord.z});
     auto neighborPosZ = registry.AcquireChunkRead({coord.x, coord.y, coord.z + 1});
     auto neighborNegZ = registry.AcquireChunkRead({coord.x, coord.y, coord.z - 1});
-
-    registry.EnsureLightForNeighborhood(coord);
 
     auto lightEntry = registry.TryGetEntry(coord);
     const LightChunk* currentLight = nullptr;
