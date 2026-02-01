@@ -341,7 +341,7 @@ void ChunkRegistry::RebuildLightForChunk(const ChunkCoord& coord) {
         return;
     }
 
-    std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
+    std::shared_lock<std::shared_mutex> lock(entry->dataMutex);
     const Chunk* chunk = entry->chunk.get();
     if (!chunk) {
         return;
@@ -497,6 +497,12 @@ void ChunkRegistry::RebuildLightForChunk(const ChunkCoord& coord) {
                 queue.push({nx, ny, nz});
             }
         }
+    }
+
+    lock.unlock();
+    std::unique_lock<std::shared_mutex> writeLock(entry->dataMutex);
+    if (!entry->chunk) {
+        return;
     }
 
     for (int z = 0; z < kChunkSize; ++z) {
