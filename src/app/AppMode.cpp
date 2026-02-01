@@ -231,6 +231,10 @@ const char* BlockLabel(voxel::BlockId id) {
         return "Stone";
     case voxel::kBlockDirt:
         return "Dirt";
+    case voxel::kBlockTorch:
+        return "Torch";
+    case voxel::kBlockLava:
+        return "Lava";
     case voxel::kBlockAir:
     default:
         return "Air";
@@ -946,7 +950,13 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
                 glm::ivec3 placeBlock = world_->currentHit.block + world_->currentHit.normal;
                 voxel::WorldBlockCoord target{placeBlock.x, placeBlock.y, placeBlock.z};
                 if (world_->chunkRegistry.GetBlockOrAir(target) == voxel::kBlockAir) {
-                    voxel::TrySetBlock(world_->chunkRegistry, world_->streaming, target, voxel::kBlockDirt);
+                    voxel::BlockId placeId = voxel::kBlockDirt;
+                    const bool shiftHeld = glfwGetKey(window_, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ||
+                                           glfwGetKey(window_, GLFW_KEY_RIGHT_SHIFT) == GLFW_PRESS;
+                    if (shiftHeld) {
+                        placeId = voxel::kBlockTorch;
+                    }
+                    voxel::TrySetBlock(world_->chunkRegistry, world_->streaming, target, placeId);
                 }
             }
         } else if (rightState == GLFW_RELEASE) {
