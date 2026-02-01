@@ -97,6 +97,7 @@ add_executable(Mineclone
   src/voxel/ChunkMesh.h
   src/voxel/ChunkMesher.cpp
   src/voxel/ChunkMesher.h
+  src/voxel/LightData.h
   src/voxel/ChunkRegistry.cpp
   src/voxel/ChunkRegistry.h
   src/voxel/ChunkStreaming.cpp
