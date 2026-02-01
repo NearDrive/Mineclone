@@ -92,6 +92,10 @@ void ChunkMesh::UploadToGpu() {
     glad_glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(VoxelVertex),
                                reinterpret_cast<void*>(offsetof(VoxelVertex, uv)));
 
+    glad_glEnableVertexAttribArray(3);
+    glad_glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(VoxelVertex),
+                               reinterpret_cast<void*>(offsetof(VoxelVertex, sunlight)));
+
     glad_glBindVertexArray(0);
 }
 
