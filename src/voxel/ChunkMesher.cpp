@@ -173,19 +173,25 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const C
                         continue;
                     }
 
-                    const float faceSunlight = sampleLight(nx, ny, nz, true);
-                    const float faceEmissive = sampleLight(nx, ny, nz, false);
                     std::uint32_t baseIndex = static_cast<std::uint32_t>(vertices.size());
                     for (std::size_t i = 0; i < face.vertices.size(); ++i) {
                         const glm::vec3& vertex = face.vertices[i];
+                        const int sampleX =
+                            x + face.neighborOffset.x + (face.neighborOffset.x == 0 ? static_cast<int>(vertex.x) : 0);
+                        const int sampleY =
+                            y + face.neighborOffset.y + (face.neighborOffset.y == 0 ? static_cast<int>(vertex.y) : 0);
+                        const int sampleZ =
+                            z + face.neighborOffset.z + (face.neighborOffset.z == 0 ? static_cast<int>(vertex.z) : 0);
+                        const float vertexSunlight = sampleLight(sampleX, sampleY, sampleZ, true);
+                        const float vertexEmissive = sampleLight(sampleX, sampleY, sampleZ, false);
                         vertices.push_back({glm::vec3{
                                                 static_cast<float>(world.x) + vertex.x,
                                                 static_cast<float>(world.y) + vertex.y,
                                                 static_cast<float>(world.z) + vertex.z},
                                             face.normal,
                                             AtlasUv(block, face.uvs[i]),
-                                            faceSunlight,
-                                            faceEmissive});
+                                            vertexSunlight,
+                                            vertexEmissive});
                     }
 
                     indices.push_back(baseIndex + 0);
