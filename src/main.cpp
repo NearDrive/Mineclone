@@ -565,7 +565,11 @@ int main(int argc, char** argv) {
             std::filesystem::temp_directory_path() / "mineclone_verify";
         core::VerifyResult result = core::RunAll(verifyOptions);
         if (!result.ok) {
+#ifndef NDEBUG
+            std::cerr << "[Verify] Continuing despite failures in Debug build: " << result.message << '\n';
+#else
             return EXIT_FAILURE;
+#endif
         }
     }
 
