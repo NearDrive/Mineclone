@@ -210,19 +210,19 @@ std::optional<ChunkReadHandle> ChunkRegistry::AcquireChunkRead(const ChunkCoord&
     auto entry = TryGetEntry(coord);
     if (!entry || entry->generationState.load(std::memory_order_acquire) != GenerationState::Ready) {
 #ifndef NDEBUG
-        static std::atomic<std::int64_t> lastLogMs{0};
-        const auto nowMs =
-            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
-                .count();
-        std::int64_t previous = lastLogMs.load(std::memory_order_relaxed);
-        if (nowMs - previous >= 1000 &&
-            lastLogMs.compare_exchange_strong(previous, nowMs, std::memory_order_relaxed)) {
-            std::cerr << "[ChunkRegistry] AcquireChunkRead failed for chunk (" << coord.x << ", " << coord.y << ", "
-                      << coord.z << "): entry=" << (entry ? "set" : "null");
-            if (entry) {
-                std::cerr << " state=" << static_cast<int>(entry->generationState.load(std::memory_order_acquire));
+        if (entry && entry->wanted.load(std::memory_order_relaxed)) {
+            static std::atomic<std::int64_t> lastLogMs{0};
+            const auto nowMs =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count();
+            std::int64_t previous = lastLogMs.load(std::memory_order_relaxed);
+            if (nowMs - previous >= 1000 &&
+                lastLogMs.compare_exchange_strong(previous, nowMs, std::memory_order_relaxed)) {
+                std::cerr << "[ChunkRegistry] AcquireChunkRead failed for chunk (" << coord.x << ", " << coord.y << ", "
+                          << coord.z << "): entry=set state="
+                          << static_cast<int>(entry->generationState.load(std::memory_order_acquire)) << '\n';
             }
-            std::cerr << '\n';
         }
 #endif
         return std::nullopt;
