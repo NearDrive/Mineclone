@@ -53,6 +53,7 @@
 #include "voxel/ChunkStreaming.h"
 #include "voxel/BlockEdit.h"
 #include "voxel/Raycast.h"
+#include "voxel/WorldGen.h"
 #include "voxel/VoxelCoords.h"
 
 namespace {
