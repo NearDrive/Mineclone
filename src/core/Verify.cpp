@@ -189,18 +189,30 @@ void CheckPersistence(VerifyState& state, const VerifyOptions& options) {
     std::filesystem::remove_all(root, ec);
 
     persistence::ChunkStorage storage(root);
-    ChunkCoord coord{2, 0, -1};
-    Chunk saved;
-    saved.Fill(kBlockStone);
-    saved.Set(1, 2, 3, kBlockDirt);
+    ChunkCoord lowCoord{2, -2, -1};
+    ChunkCoord highCoord{2, 3, -1};
+    Chunk savedLow;
+    Chunk savedHigh;
+    savedLow.Fill(kBlockStone);
+    savedLow.Set(1, 2, 3, kBlockDirt);
+    savedHigh.Fill(kBlockDirt);
+    savedHigh.Set(4, 5, 6, kBlockStone);
 
-    Require(storage.SaveChunk(coord, saved), "Failed to save chunk in persistence check.", state);
-    Chunk loaded;
-    Require(storage.LoadChunk(coord, loaded), "Failed to load chunk in persistence check.", state);
-    const BlockId* savedData = saved.Data();
-    const BlockId* loadedData = loaded.Data();
-    Require(std::equal(savedData, savedData + kChunkVolume, loadedData),
-            "Chunk persistence data mismatch.", state);
+    Require(storage.SaveChunk(lowCoord, savedLow), "Failed to save low chunk in persistence check.", state);
+    Require(storage.SaveChunk(highCoord, savedHigh), "Failed to save high chunk in persistence check.", state);
+
+    Chunk loadedLow;
+    Chunk loadedHigh;
+    Require(storage.LoadChunk(lowCoord, loadedLow), "Failed to load low chunk in persistence check.", state);
+    Require(storage.LoadChunk(highCoord, loadedHigh), "Failed to load high chunk in persistence check.", state);
+    const BlockId* savedLowData = savedLow.Data();
+    const BlockId* loadedLowData = loadedLow.Data();
+    Require(std::equal(savedLowData, savedLowData + kChunkVolume, loadedLowData),
+            "Low chunk persistence data mismatch.", state);
+    const BlockId* savedHighData = savedHigh.Data();
+    const BlockId* loadedHighData = loadedHigh.Data();
+    Require(std::equal(savedHighData, savedHighData + kChunkVolume, loadedHighData),
+            "High chunk persistence data mismatch.", state);
 }
 
 void CheckJobScheduling(VerifyState& state) {
