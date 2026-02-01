@@ -54,6 +54,13 @@ GLuint CreateTextureFromPixels(int width, int height, const std::vector<std::uin
     return texture;
 }
 
+struct TexturePixels {
+    int width = 0;
+    int height = 0;
+    std::vector<std::uint8_t> pixels;
+    bool IsValid() const { return width > 0 && height > 0 && !pixels.empty(); }
+};
+
 std::vector<std::uint8_t> BuildProceduralDirtPixels(int width, int height) {
     std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u);
     std::uint32_t state = 0x1234abcd;
@@ -91,9 +98,48 @@ std::vector<std::uint8_t> BuildProceduralDirtPixels(int width, int height) {
     return pixels;
 }
 
+std::vector<std::uint8_t> BuildProceduralStonePixels(int width, int height) {
+    std::vector<std::uint8_t> pixels(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4u);
+    std::uint32_t state = 0x7f4a7c15u;
+    auto nextRandom = [&state]() {
+        state = state * 1103515245u + 12345u;
+        return state;
+    };
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const std::uint32_t noiseSeed =
+                nextRandom() + static_cast<std::uint32_t>(x * 2654435761u) + static_cast<std::uint32_t>(y * 1013904223u);
+            const int noise = static_cast<int>((noiseSeed >> 24) & 0xFF) % 25 - 12;
+            int shade = 130 + noise;
+            shade = std::clamp(shade, 80, 200);
+            const std::size_t index = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
+                                       static_cast<std::size_t>(x)) *
+                                      4u;
+            pixels[index + 0] = static_cast<std::uint8_t>(shade);
+            pixels[index + 1] = static_cast<std::uint8_t>(shade);
+            pixels[index + 2] = static_cast<std::uint8_t>(shade);
+            pixels[index + 3] = 255;
+        }
+    }
+    return pixels;
+}
+
 GLuint CreateProceduralDirtTexture(int width, int height) {
     auto pixels = BuildProceduralDirtPixels(width, height);
     return CreateTextureFromPixels(width, height, pixels);
+}
+
+TexturePixels LoadTexturePixels(const std::string& path) {
+    TexturePixels result;
+    int channels = 0;
+    stbi_uc* data = stbi_load(path.c_str(), &result.width, &result.height, &channels, 4);
+    if (!data) {
+        return result;
+    }
+    result.pixels.assign(data, data + (result.width * result.height * 4));
+    stbi_image_free(data);
+    return result;
 }
 
 GLuint LoadTexture2D(const std::string& path) {
@@ -108,6 +154,58 @@ GLuint LoadTexture2D(const std::string& path) {
     std::vector<std::uint8_t> pixels(data, data + (width * height * 4));
     stbi_image_free(data);
     return CreateTextureFromPixels(width, height, pixels);
+}
+
+GLuint CreateBlockAtlasTexture() {
+    constexpr int kFallbackSize = 32;
+    TexturePixels dirt = LoadTexturePixels("textures/dirt.png");
+    if (!dirt.IsValid()) {
+        dirt.width = kFallbackSize;
+        dirt.height = kFallbackSize;
+        dirt.pixels = BuildProceduralDirtPixels(kFallbackSize, kFallbackSize);
+        std::cout << "[RenderTest] Using procedurally generated dirt texture.\n";
+    }
+
+    TexturePixels stone = LoadTexturePixels("textures/stone.png");
+    if (!stone.IsValid()) {
+        stone.width = kFallbackSize;
+        stone.height = kFallbackSize;
+        stone.pixels = BuildProceduralStonePixels(kFallbackSize, kFallbackSize);
+        std::cout << "[RenderTest] Using procedurally generated stone texture.\n";
+    }
+
+    if (dirt.width != stone.width || dirt.height != stone.height) {
+        std::cout << "[RenderTest] Mismatched block texture sizes, using procedural 32x32 atlas.\n";
+        dirt.width = kFallbackSize;
+        dirt.height = kFallbackSize;
+        dirt.pixels = BuildProceduralDirtPixels(kFallbackSize, kFallbackSize);
+        stone.width = kFallbackSize;
+        stone.height = kFallbackSize;
+        stone.pixels = BuildProceduralStonePixels(kFallbackSize, kFallbackSize);
+    }
+
+    const int atlasWidth = dirt.width * 2;
+    const int atlasHeight = dirt.height;
+    std::vector<std::uint8_t> atlas(static_cast<std::size_t>(atlasWidth) * atlasHeight * 4u);
+
+    auto blit = [&](const TexturePixels& src, int dstX) {
+        for (int y = 0; y < src.height; ++y) {
+            for (int x = 0; x < src.width; ++x) {
+                const std::size_t srcIndex =
+                    (static_cast<std::size_t>(y) * src.width + static_cast<std::size_t>(x)) * 4u;
+                const std::size_t dstIndex =
+                    (static_cast<std::size_t>(y) * atlasWidth + static_cast<std::size_t>(x + dstX)) * 4u;
+                atlas[dstIndex + 0] = src.pixels[srcIndex + 0];
+                atlas[dstIndex + 1] = src.pixels[srcIndex + 1];
+                atlas[dstIndex + 2] = src.pixels[srcIndex + 2];
+                atlas[dstIndex + 3] = src.pixels[srcIndex + 3];
+            }
+        }
+    };
+
+    blit(dirt, 0);
+    blit(stone, dirt.width);
+    return CreateTextureFromPixels(atlasWidth, atlasHeight, atlas);
 }
 
 void glfwErrorCallback(int error, const char* description) {
@@ -329,16 +427,12 @@ int RunRenderTest(const RenderTestOptions& options) {
     }
     std::cout << "[RenderTest] Shaders loaded.\n";
 
-    GLuint blockTexture = LoadTexture2D("textures/dirt.png");
+    GLuint blockTexture = CreateBlockAtlasTexture();
     if (blockTexture == 0) {
-        blockTexture = CreateProceduralDirtTexture(32, 32);
-        if (blockTexture == 0) {
-            std::cerr << "[RenderTest] Failed to load or generate textures/dirt.png\n";
-            glfwDestroyWindow(window);
-            glfwTerminate();
-            return EXIT_FAILURE;
-        }
-        std::cout << "[RenderTest] Using procedurally generated dirt texture.\n";
+        std::cerr << "[RenderTest] Failed to create block atlas texture.\n";
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return EXIT_FAILURE;
     }
 
     GLuint fbo = 0;

@@ -6,6 +6,24 @@
 
 namespace voxel {
 
+namespace {
+
+constexpr float kAtlasTileWidth = 0.5f;
+
+float AtlasOffsetForBlock(BlockId id) {
+    if (id == kBlockStone) {
+        return kAtlasTileWidth;
+    }
+    return 0.0f;
+}
+
+glm::vec2 AtlasUv(BlockId id, const glm::vec2& uv) {
+    const float offset = AtlasOffsetForBlock(id);
+    return glm::vec2{uv.x * kAtlasTileWidth + offset, uv.y};
+}
+
+} // namespace
+
 void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const ChunkRegistry& registry,
                             ChunkMeshCpu& mesh) const {
     mesh.Clear();
@@ -82,7 +100,7 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, const C
                                                 static_cast<float>(world.y) + vertex.y,
                                                 static_cast<float>(world.z) + vertex.z},
                                             face.normal,
-                                            face.uvs[i]});
+                                            AtlasUv(block, face.uvs[i])});
                     }
 
                     indices.push_back(baseIndex + 0);
