@@ -15,6 +15,7 @@
 #include "voxel/ChunkCoord.h"
 #include "voxel/ChunkJobs.h"
 #include "voxel/ChunkMesh.h"
+#include "voxel/LightData.h"
 #include "voxel/VoxelCoords.h"
 
 namespace persistence {
@@ -45,12 +46,15 @@ enum class GpuState {
 
 struct ChunkEntry {
     ChunkMesh mesh;
+    LightChunk light;
 
     std::unique_ptr<Chunk> chunk;
     std::atomic<GenerationState> generationState{GenerationState::NotScheduled};
     std::atomic<MeshingState> meshingState{MeshingState::NotScheduled};
     std::atomic<GpuState> gpuState{GpuState::NotUploaded};
     std::atomic<bool> dirty{false};
+    std::atomic<bool> lightDirty{true};
+    std::atomic<bool> lightReady{false};
     std::atomic<bool> wanted{true};
     mutable std::shared_mutex dataMutex;
 };
@@ -84,6 +88,11 @@ public:
     BlockId GetBlock(const WorldBlockCoord& world) const;
     BlockId GetBlockOrAir(const WorldBlockCoord& world) const;
     void SetBlock(const WorldBlockCoord& world, BlockId id);
+
+    void EnsureLightForChunk(const ChunkCoord& coord);
+    void EnsureLightForNeighborhood(const ChunkCoord& coord);
+    void RebuildLightForChunk(const ChunkCoord& coord);
+    void RebuildLightForNeighborhood(const ChunkCoord& coord);
 
     std::size_t LoadedCount() const;
     std::size_t GpuReadyCount() const;

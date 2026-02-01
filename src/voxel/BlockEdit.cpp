@@ -49,6 +49,7 @@ bool TrySetBlock(ChunkRegistry& registry, ChunkStreaming& streaming, const World
 
     const ChunkCoord chunkCoord = WorldToChunkCoord(world, kChunkSize);
     const LocalCoord local = WorldToLocalCoord(world, kChunkSize);
+    registry.RebuildLightForNeighborhood(chunkCoord);
     RequestNeighborRemesh(chunkCoord, local, streaming, registry);
     return true;
 }
