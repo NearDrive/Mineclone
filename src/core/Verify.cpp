@@ -259,7 +259,14 @@ void CheckWorkerPoolShutdown(VerifyState& state) {
     ChunkMesher mesher;
     ChunkStreaming streaming;
     core::WorkerPool pool;
-    pool.Start(1, streaming.GenerateQueue(), streaming.MeshQueue(), streaming.UploadQueue(), registry, mesher, &profiler);
+    pool.Start(1,
+               streaming.GenerateQueue(),
+               streaming.MeshQueue(),
+               streaming.UploadQueue(),
+               registry,
+               nullptr,
+               mesher,
+               &profiler);
     pool.Stop();
     Require(pool.ThreadCount() == 0, "Worker pool threads did not stop.", state);
 }
