@@ -51,6 +51,12 @@ constexpr int kRenderRadiusMax = 32;
 constexpr int kLoadRadiusDefault = 10;
 constexpr int kLoadRadiusMin = kRenderRadiusMin;
 constexpr int kLoadRadiusMax = 48;
+constexpr int kChunkCreatesPerFrameDefault = 3;
+constexpr int kChunkMeshesPerFrameDefault = 2;
+constexpr int kGpuUploadsPerFrameDefault = 3;
+constexpr int kLoadingChunkCreatesPerFrame = 32;
+constexpr int kLoadingChunkMeshesPerFrame = 16;
+constexpr int kLoadingGpuUploadsPerFrame = 32;
 constexpr float kReachDistance = 6.0f;
 constexpr float kHighlightEpsilon = 0.015f;
 constexpr float kMaxDeltaTime = 0.05f;
@@ -293,9 +299,9 @@ struct AppMode::WorldRuntime {
         voxel::ChunkStreamingConfig config;
         config.renderRadius = kRenderRadiusDefault;
         config.loadRadius = kLoadRadiusDefault;
-        config.maxChunkCreatesPerFrame = 3;
-        config.maxChunkMeshesPerFrame = 2;
-        config.maxGpuUploadsPerFrame = 3;
+        config.maxChunkCreatesPerFrame = kChunkCreatesPerFrameDefault;
+        config.maxChunkMeshesPerFrame = kChunkMeshesPerFrameDefault;
+        config.maxGpuUploadsPerFrame = kGpuUploadsPerFrameDefault;
         config.workerThreads = workerThreads;
         return config;
     }
@@ -564,6 +570,11 @@ void AppMode::SetState(GameState state) {
     if (state_ == GameState::Playing) {
         SetMouseCapture(window_, options_.allowInput);
         loadMissing_ = false;
+        if (world_) {
+            world_->streaming.SetBudgets(kChunkCreatesPerFrameDefault,
+                                         kChunkMeshesPerFrameDefault,
+                                         kGpuUploadsPerFrameDefault);
+        }
     } else {
         SetMouseCapture(window_, false);
     }
@@ -644,6 +655,11 @@ void AppMode::UpdateMenuTitle(bool force) {
                                                     : MenuModel::kMainMenuTitle;
         glfwSetWindowTitle(window_, std::string(title).c_str());
     } else if (state_ == GameState::Loading) {
+        if (world_) {
+            world_->streaming.SetBudgets(kLoadingChunkCreatesPerFrame,
+                                         kLoadingChunkMeshesPerFrame,
+                                         kLoadingGpuUploadsPerFrame);
+        }
         glfwSetWindowTitle(window_, std::string("[LOADING]").c_str());
     } else if (state_ == GameState::PauseMenu) {
         glfwSetWindowTitle(window_, std::string(MenuModel::kPauseMenuTitle).c_str());
