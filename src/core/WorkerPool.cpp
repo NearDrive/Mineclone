@@ -66,15 +66,15 @@ std::size_t WorkerPool::ThreadCount() const {
 
 void WorkerPool::WorkerLoop() {
     while (!stop_.load()) {
-        voxel::GenerateJob generateJob;
-        if (generateQueue_ && generateQueue_->try_pop(generateJob)) {
-            ExecuteGenerate(generateJob);
-            continue;
-        }
-
         voxel::MeshJob meshJob;
         if (meshQueue_ && meshQueue_->try_pop(meshJob)) {
             ExecuteMesh(meshJob);
+            continue;
+        }
+
+        voxel::GenerateJob generateJob;
+        if (generateQueue_ && generateQueue_->try_pop(generateJob)) {
+            ExecuteGenerate(generateJob);
             continue;
         }
 
