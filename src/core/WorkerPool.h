@@ -16,6 +16,10 @@ class ChunkMesher;
 class ChunkRegistry;
 } // namespace voxel
 
+namespace persistence {
+class ChunkStorage;
+} // namespace persistence
+
 namespace core {
 
 class WorkerPool {
@@ -29,6 +33,7 @@ public:
                ThreadSafeQueue<voxel::MeshJob>& meshQueue,
                ThreadSafeQueue<voxel::MeshReady>& readyQueue,
                voxel::ChunkRegistry& registry,
+               persistence::ChunkStorage* storage,
                const voxel::ChunkMesher& mesher,
                core::Profiler* profiler);
     void Stop();
@@ -48,6 +53,7 @@ private:
     ThreadSafeQueue<voxel::MeshJob>* meshQueue_ = nullptr;
     ThreadSafeQueue<voxel::MeshReady>* readyQueue_ = nullptr;
     voxel::ChunkRegistry* registry_ = nullptr;
+    persistence::ChunkStorage* storage_ = nullptr;
     const voxel::ChunkMesher* mesher_ = nullptr;
     core::Profiler* profiler_ = nullptr;
 

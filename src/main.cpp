@@ -723,6 +723,8 @@ int main(int argc, char** argv) {
         streamingConfig.maxChunkCreatesPerFrame = 3;
         streamingConfig.maxChunkMeshesPerFrame = 2;
         streamingConfig.maxGpuUploadsPerFrame = 3;
+        streamingConfig.maxGpuUploadMsPerFrame = 2;
+        streamingConfig.verticalRadius = 2;
         streamingConfig.workerThreads = runSoakTest
             ? kSoakWorkerThreads
             : (interactionTest ? kInteractionWorkerThreads : (smokeTest ? 0 : 2));
@@ -737,6 +739,7 @@ int main(int argc, char** argv) {
                              streaming.MeshQueue(),
                              streaming.UploadQueue(),
                              chunkRegistry,
+                             &chunkStorage,
                              mesher,
                              &profiler);
         }

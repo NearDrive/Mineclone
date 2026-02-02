@@ -5,6 +5,7 @@
 #include <shared_mutex>
 
 #include "core/Assert.h"
+#include "persistence/ChunkStorage.h"
 #include "voxel/ChunkMesher.h"
 #include "voxel/ChunkRegistry.h"
 
@@ -15,6 +16,7 @@ void WorkerPool::Start(std::size_t threadCount,
                        ThreadSafeQueue<voxel::MeshJob>& meshQueue,
                        ThreadSafeQueue<voxel::MeshReady>& readyQueue,
                        voxel::ChunkRegistry& registry,
+                       persistence::ChunkStorage* storage,
                        const voxel::ChunkMesher& mesher,
                        core::Profiler* profiler) {
     Stop();
@@ -27,6 +29,7 @@ void WorkerPool::Start(std::size_t threadCount,
     meshQueue_ = &meshQueue;
     readyQueue_ = &readyQueue;
     registry_ = &registry;
+    storage_ = storage;
     mesher_ = &mesher;
     profiler_ = profiler;
 
@@ -105,7 +108,13 @@ void WorkerPool::ExecuteGenerate(const voxel::GenerateJob& job) {
     }
 
     voxel::Chunk chunk;
-    voxel::ChunkRegistry::GenerateChunkData(job.coord, chunk);
+    bool loaded = false;
+    if (storage_) {
+        loaded = storage_->LoadChunk(job.coord, chunk);
+    }
+    if (!loaded) {
+        voxel::ChunkRegistry::GenerateChunkData(job.coord, chunk);
+    }
 
     {
         std::unique_lock<std::shared_mutex> lock(entry->dataMutex);

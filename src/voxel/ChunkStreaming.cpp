@@ -1,6 +1,7 @@
 #include "voxel/ChunkStreaming.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -58,6 +59,14 @@ void ChunkStreaming::SetBudgets(int maxCreatesPerFrame, int maxMeshesPerFrame, i
     config_.maxChunkCreatesPerFrame = std::max(1, maxCreatesPerFrame);
     config_.maxChunkMeshesPerFrame = std::max(1, maxMeshesPerFrame);
     config_.maxGpuUploadsPerFrame = std::max(1, maxUploadsPerFrame);
+}
+
+void ChunkStreaming::SetUploadTimeBudgetMs(int maxUploadMsPerFrame) {
+    config_.maxGpuUploadMsPerFrame = std::max(0, maxUploadMsPerFrame);
+}
+
+void ChunkStreaming::SetVerticalRadius(int radius) {
+    config_.verticalRadius = std::max(0, radius);
 }
 
 void ChunkStreaming::Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry, const ChunkMesher& mesher) {
@@ -140,6 +149,15 @@ void ChunkStreaming::BuildDesiredSet(const ChunkCoord& playerChunk) {
             }
         }
     }
+
+    std::sort(desiredCoords_.begin(), desiredCoords_.end(),
+              [&](const ChunkCoord& a, const ChunkCoord& b) {
+                  const int da =
+                      std::max({std::abs(a.x - playerChunk.x), std::abs(a.z - playerChunk.z), std::abs(a.y - playerChunk.y)});
+                  const int db =
+                      std::max({std::abs(b.x - playerChunk.x), std::abs(b.z - playerChunk.z), std::abs(b.y - playerChunk.y)});
+                  return da < db;
+              });
 }
 
 void ChunkStreaming::UnloadOutOfRange(ChunkRegistry& registry) {
@@ -170,31 +188,18 @@ void ChunkStreaming::EnqueueMissing(ChunkRegistry& registry) {
         auto entry = registry.GetOrCreateEntry(coord);
         entry->wanted.store(true);
 
-        if (createBudget > 0) {
+        if (createBudget > 0 && generateQueue_.size() < config_.maxGenerateQueueSize) {
             GenerationState genExpected = GenerationState::NotScheduled;
-            if (entry->generationState.compare_exchange_strong(genExpected, GenerationState::Generating)) {
-                bool loaded = false;
-                if (storage_) {
-                    voxel::Chunk chunk;
-                    if (storage_->LoadChunk(coord, chunk)) {
-                        std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
-                        entry->chunk = std::make_unique<voxel::Chunk>(std::move(chunk));
-                        entry->generationState.store(GenerationState::Ready, std::memory_order_release);
-                        entry->dirty.store(false, std::memory_order_release);
-                        loaded = true;
-                    }
-                }
-                if (!loaded) {
-                    entry->generationState.store(GenerationState::Queued, std::memory_order_release);
-                    generateQueue_.push(GenerateJob{coord, entry});
-                }
+            if (entry->generationState.compare_exchange_strong(genExpected, GenerationState::Queued)) {
+                generateQueue_.push(GenerateJob{coord, entry});
                 ++stats_.createdThisFrame;
                 --createBudget;
             }
         }
 
         if (meshBudget > 0 &&
-            entry->generationState.load(std::memory_order_acquire) == GenerationState::Ready) {
+            entry->generationState.load(std::memory_order_acquire) == GenerationState::Ready &&
+            meshQueue_.size() < config_.maxMeshQueueSize) {
             MeshingState meshExpected = MeshingState::NotScheduled;
             if (entry->meshingState.compare_exchange_strong(meshExpected, MeshingState::Queued)) {
                 meshQueue_.push(MeshJob{coord, entry});
@@ -231,7 +236,15 @@ core::ThreadSafeQueue<MeshReady>& ChunkStreaming::UploadQueue() {
 
 void ChunkStreaming::ProcessUploads(ChunkRegistry& registry) {
     core::ScopedTimer uploadTimer(profiler_, core::Metric::Upload);
+    const auto startTime = std::chrono::steady_clock::now();
     while (stats_.uploadedThisFrame < config_.maxGpuUploadsPerFrame) {
+        if (config_.maxGpuUploadMsPerFrame > 0) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - startTime);
+            if (elapsed.count() >= config_.maxGpuUploadMsPerFrame) {
+                break;
+            }
+        }
         MeshReady ready;
         if (!uploadQueue_.try_pop(ready)) {
             break;
