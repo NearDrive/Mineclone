@@ -532,6 +532,15 @@ void ChunkRegistry::RebuildLightForNeighborhood(const ChunkCoord& coord) {
     }
 }
 
+void ChunkRegistry::MarkLightDirty(const ChunkCoord& coord) {
+    auto entry = TryGetEntry(coord);
+    if (!entry) {
+        return;
+    }
+    entry->lightDirty.store(true, std::memory_order_release);
+    entry->lightReady.store(false, std::memory_order_release);
+}
+
 std::size_t ChunkRegistry::LoadedCount() const {
     std::lock_guard<std::mutex> lock(entriesMutex_);
     return entries_.size();
