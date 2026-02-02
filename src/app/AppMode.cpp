@@ -54,9 +54,11 @@ constexpr int kLoadRadiusMax = 48;
 constexpr int kChunkCreatesPerFrameDefault = 3;
 constexpr int kChunkMeshesPerFrameDefault = 2;
 constexpr int kGpuUploadsPerFrameDefault = 3;
+constexpr int kGpuUploadMsPerFrameDefault = 2;
 constexpr int kLoadingChunkCreatesPerFrame = 128;
 constexpr int kLoadingChunkMeshesPerFrame = 64;
 constexpr int kLoadingGpuUploadsPerFrame = 128;
+constexpr int kLoadingGpuUploadMsPerFrame = 4;
 constexpr float kReachDistance = 6.0f;
 constexpr float kHighlightEpsilon = 0.015f;
 constexpr float kMaxDeltaTime = 0.05f;
@@ -316,6 +318,7 @@ struct AppMode::WorldRuntime {
         config.maxChunkCreatesPerFrame = kChunkCreatesPerFrameDefault;
         config.maxChunkMeshesPerFrame = kChunkMeshesPerFrameDefault;
         config.maxGpuUploadsPerFrame = kGpuUploadsPerFrameDefault;
+        config.maxGpuUploadMsPerFrame = kGpuUploadMsPerFrameDefault;
         config.workerThreads = workerThreads;
         return config;
     }
@@ -588,6 +591,7 @@ void AppMode::SetState(GameState state) {
             world_->streaming.SetBudgets(kChunkCreatesPerFrameDefault,
                                          kChunkMeshesPerFrameDefault,
                                          kGpuUploadsPerFrameDefault);
+            world_->streaming.SetUploadTimeBudgetMs(kGpuUploadMsPerFrameDefault);
         }
     } else {
         SetMouseCapture(window_, false);
@@ -673,6 +677,7 @@ void AppMode::UpdateMenuTitle(bool force) {
             world_->streaming.SetBudgets(kLoadingChunkCreatesPerFrame,
                                          kLoadingChunkMeshesPerFrame,
                                          kLoadingGpuUploadsPerFrame);
+            world_->streaming.SetUploadTimeBudgetMs(kLoadingGpuUploadMsPerFrame);
         }
         glfwSetWindowTitle(window_, std::string("[LOADING]").c_str());
     } else if (state_ == GameState::PauseMenu) {
