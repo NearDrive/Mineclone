@@ -58,7 +58,9 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRe
     auto& vertices = mesh.vertices;
     auto& indices = mesh.indices;
 
-    registry.EnsureLightForNeighborhood(coord);
+    if (lightingEnabled_) {
+        registry.EnsureLightForNeighborhood(coord);
+    }
 
     auto neighborPosX = registry.AcquireChunkRead({coord.x + 1, coord.y, coord.z});
     auto neighborNegX = registry.AcquireChunkRead({coord.x - 1, coord.y, coord.z});
@@ -69,16 +71,24 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRe
 
     auto lightEntry = registry.TryGetEntry(coord);
     const LightChunk* currentLight = nullptr;
-    if (lightEntry && lightEntry->lightReady.load(std::memory_order_acquire)) {
+    if (lightingEnabled_ && lightEntry && lightEntry->lightReady.load(std::memory_order_acquire)) {
         currentLight = &lightEntry->light;
     }
 
-    LightReadHandle lightPosX = AcquireLightRead({coord.x + 1, coord.y, coord.z}, registry);
-    LightReadHandle lightNegX = AcquireLightRead({coord.x - 1, coord.y, coord.z}, registry);
-    LightReadHandle lightPosY = AcquireLightRead({coord.x, coord.y + 1, coord.z}, registry);
-    LightReadHandle lightNegY = AcquireLightRead({coord.x, coord.y - 1, coord.z}, registry);
-    LightReadHandle lightPosZ = AcquireLightRead({coord.x, coord.y, coord.z + 1}, registry);
-    LightReadHandle lightNegZ = AcquireLightRead({coord.x, coord.y, coord.z - 1}, registry);
+    LightReadHandle lightPosX;
+    LightReadHandle lightNegX;
+    LightReadHandle lightPosY;
+    LightReadHandle lightNegY;
+    LightReadHandle lightPosZ;
+    LightReadHandle lightNegZ;
+    if (lightingEnabled_) {
+        lightPosX = AcquireLightRead({coord.x + 1, coord.y, coord.z}, registry);
+        lightNegX = AcquireLightRead({coord.x - 1, coord.y, coord.z}, registry);
+        lightPosY = AcquireLightRead({coord.x, coord.y + 1, coord.z}, registry);
+        lightNegY = AcquireLightRead({coord.x, coord.y - 1, coord.z}, registry);
+        lightPosZ = AcquireLightRead({coord.x, coord.y, coord.z + 1}, registry);
+        lightNegZ = AcquireLightRead({coord.x, coord.y, coord.z - 1}, registry);
+    }
 
     auto sampleNeighbor = [&](int nx, int ny, int nz) -> BlockId {
         if (nx >= 0 && nx < kChunkSize && ny >= 0 && ny < kChunkSize && nz >= 0 && nz < kChunkSize) {
@@ -112,6 +122,9 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRe
     };
 
     auto sampleLight = [&](int nx, int ny, int nz, bool sunlight) -> float {
+        if (!lightingEnabled_) {
+            return sunlight ? 1.0f : 0.0f;
+        }
         const LightChunk* light = nullptr;
         int lx = nx;
         int ly = ny;

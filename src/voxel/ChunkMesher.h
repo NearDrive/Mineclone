@@ -9,8 +9,12 @@ namespace voxel {
 
 class ChunkMesher {
 public:
+    void SetLightingEnabled(bool enabled) { lightingEnabled_ = enabled; }
     void BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRegistry& registry,
                    ChunkMeshCpu& mesh) const;
+
+private:
+    bool lightingEnabled_ = true;
 };
 
 } // namespace voxel
