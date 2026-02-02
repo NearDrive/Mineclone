@@ -1,6 +1,7 @@
 #include "voxel/ChunkStreaming.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -58,6 +59,10 @@ void ChunkStreaming::SetBudgets(int maxCreatesPerFrame, int maxMeshesPerFrame, i
     config_.maxChunkCreatesPerFrame = std::max(1, maxCreatesPerFrame);
     config_.maxChunkMeshesPerFrame = std::max(1, maxMeshesPerFrame);
     config_.maxGpuUploadsPerFrame = std::max(1, maxUploadsPerFrame);
+}
+
+void ChunkStreaming::SetUploadTimeBudgetMs(int maxUploadMsPerFrame) {
+    config_.maxGpuUploadMsPerFrame = std::max(0, maxUploadMsPerFrame);
 }
 
 void ChunkStreaming::Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry, const ChunkMesher& mesher) {
@@ -231,7 +236,15 @@ core::ThreadSafeQueue<MeshReady>& ChunkStreaming::UploadQueue() {
 
 void ChunkStreaming::ProcessUploads(ChunkRegistry& registry) {
     core::ScopedTimer uploadTimer(profiler_, core::Metric::Upload);
+    const auto startTime = std::chrono::steady_clock::now();
     while (stats_.uploadedThisFrame < config_.maxGpuUploadsPerFrame) {
+        if (config_.maxGpuUploadMsPerFrame > 0) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - startTime);
+            if (elapsed.count() >= config_.maxGpuUploadMsPerFrame) {
+                break;
+            }
+        }
         MeshReady ready;
         if (!uploadQueue_.try_pop(ready)) {
             break;

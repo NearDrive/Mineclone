@@ -25,6 +25,7 @@ struct ChunkStreamingConfig {
     int maxChunkCreatesPerFrame = 3;
     int maxChunkMeshesPerFrame = 2;
     int maxGpuUploadsPerFrame = 3;
+    int maxGpuUploadMsPerFrame = 2;
     int workerThreads = 2;
     bool enabled = true;
 };
@@ -56,6 +57,7 @@ public:
     void SetEnabled(bool enabled);
     bool Enabled() const;
     void SetBudgets(int maxCreatesPerFrame, int maxMeshesPerFrame, int maxUploadsPerFrame);
+    void SetUploadTimeBudgetMs(int maxUploadMsPerFrame);
 
     void Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry, const ChunkMesher& mesher);
     void SetProfiler(core::Profiler* profiler);
