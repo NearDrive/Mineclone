@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
@@ -42,7 +43,7 @@ private:
     void HandleMenuInput();
     void HandlePlayingInput();
     void DrawLoadingScreen();
-    float GetLoadingProgress() const;
+    void UpdateLoadingProgress();
 
     void UpdateMenuTitle(bool force);
 
@@ -85,6 +86,11 @@ private:
     bool menuHintPrinted_ = false;
     bool loadingInitialized_ = false;
     float loadingProgress_ = 0.0f;
+    bool loadingFallbackActive_ = false;
+    std::chrono::steady_clock::time_point lastLoadingLogTime_{};
+    std::chrono::steady_clock::time_point lastLoadingProgressTime_{};
+    std::size_t lastLoadingGpuReady_ = 0;
+    std::size_t lastLoadingMeshed_ = 0;
 
     struct WorldRuntime;
     std::unique_ptr<WorldRuntime> world_;

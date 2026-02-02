@@ -504,7 +504,7 @@ void AppMode::Tick() {
             voxel::ChunkCoord playerChunk = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
             world_->streaming.Tick(playerChunk, world_->chunkRegistry, world_->mesher);
             world_->workerPool.NotifyWork();
-            loadingProgress_ = GetLoadingProgress();
+            UpdateLoadingProgress();
             DrawLoadingScreen();
             if (loadingProgress_ >= 1.0f) {
                 SetState(GameState::Playing);
@@ -652,10 +652,12 @@ void AppMode::UpdateMenuTitle(bool force) {
     lastTitleUpdate_ = now;
 }
 
-float AppMode::GetLoadingProgress() const {
+void AppMode::UpdateLoadingProgress() {
     if (!world_) {
-        return 0.0f;
+        loadingProgress_ = 0.0f;
+        return;
     }
+
     const voxel::ChunkStreamingConfig& config = world_->streaming.Config();
     const int radius = config.loadRadius;
     const int minChunkY = voxel::WorldToChunkCoord(voxel::WorldBlockCoord{0, voxel::kWorldMinY, 0},
@@ -677,11 +679,56 @@ float AppMode::GetLoadingProgress() const {
     const std::size_t total =
         static_cast<std::size_t>((radius * 2 + 1) * (radius * 2 + 1)) * std::max<std::size_t>(layers, 1);
     if (total == 0) {
-        return 1.0f;
+        loadingProgress_ = 1.0f;
+        return;
     }
+
     const voxel::ChunkStreamingStats& stats = world_->streaming.Stats();
-    const float progress = static_cast<float>(stats.gpuReadyChunks) / static_cast<float>(total);
-    return std::clamp(progress, 0.0f, 1.0f);
+    auto progressFor = [&](std::size_t readyCount) {
+        const float progress = static_cast<float>(readyCount) / static_cast<float>(total);
+        return std::clamp(progress, 0.0f, 1.0f);
+    };
+
+    const float gpuProgress = progressFor(stats.gpuReadyChunks);
+    const float meshProgress = progressFor(stats.meshedCpuReady);
+    if (stats.gpuReadyChunks == 0 && stats.meshedCpuReady > 0) {
+        loadingProgress_ = meshProgress;
+        if (!loadingFallbackActive_) {
+            std::cout << "[Loading] GPU uploads not visible yet; falling back to mesh progress ("
+                      << stats.meshedCpuReady << "/" << total << ").\n";
+            loadingFallbackActive_ = true;
+        }
+    } else {
+        loadingProgress_ = gpuProgress;
+        if (loadingFallbackActive_ && stats.gpuReadyChunks > 0) {
+            std::cout << "[Loading] GPU uploads resumed; returning to GPU progress.\n";
+            loadingFallbackActive_ = false;
+        }
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (now - lastLoadingLogTime_ >= std::chrono::seconds(1)) {
+        std::cout << "[Loading] Ready GPU " << stats.gpuReadyChunks << "/" << total
+                  << ", meshed " << stats.meshedCpuReady << ", generated " << stats.generatedChunksReady
+                  << ", loaded " << stats.loadedChunks << " (queues g/m/u "
+                  << stats.createQueue << "/" << stats.meshQueue << "/" << stats.uploadQueue
+                  << ", progress " << static_cast<int>(loadingProgress_ * 100.0f) << "%).\n";
+        lastLoadingLogTime_ = now;
+    }
+
+    if (lastLoadingProgressTime_ == std::chrono::steady_clock::time_point{}) {
+        lastLoadingProgressTime_ = now;
+    }
+    if (stats.gpuReadyChunks != lastLoadingGpuReady_ || stats.meshedCpuReady != lastLoadingMeshed_) {
+        lastLoadingProgressTime_ = now;
+    }
+    if (now - lastLoadingProgressTime_ >= std::chrono::seconds(5)) {
+        std::cout << "[Loading] Warning: no progress in GPU or mesh counts for 5s; check worker threads and OpenGL "
+                     "uploads.\n";
+        lastLoadingProgressTime_ = now;
+    }
+    lastLoadingGpuReady_ = stats.gpuReadyChunks;
+    lastLoadingMeshed_ = stats.meshedCpuReady;
 }
 
 void AppMode::DrawLoadingScreen() {
@@ -768,6 +815,11 @@ void AppMode::StartNewWorld(const std::string& worldId) {
     loadMissing_ = false;
     loadingProgress_ = 0.0f;
     loadingInitialized_ = false;
+    loadingFallbackActive_ = false;
+    lastLoadingLogTime_ = {};
+    lastLoadingProgressTime_ = {};
+    lastLoadingGpuReady_ = 0;
+    lastLoadingMeshed_ = 0;
     SetState(GameState::Loading);
 }
 
