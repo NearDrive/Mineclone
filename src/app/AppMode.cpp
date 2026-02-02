@@ -1,6 +1,7 @@
 #include "app/AppMode.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cmath>
 #include <ctime>
@@ -381,6 +382,8 @@ std::string StateLabel(GameState state) {
     switch (state) {
         case GameState::MainMenu:
             return "MainMenu";
+        case GameState::Loading:
+            return "Loading";
         case GameState::Playing:
             return "Playing";
         case GameState::PauseMenu:
@@ -432,8 +435,16 @@ void AppMode::InitializeShaders() {
         return;
     }
 
+    Shader loadingShader;
+    if (!loadingShader.loadFromFiles("shaders/loading.vert", "shaders/loading.frag", shaderError)) {
+        initError_ = "[Shader] " + shaderError;
+        initialized_ = false;
+        return;
+    }
+
     shader_ = std::move(shader);
     debugShader_ = std::move(debugShader);
+    loadingShader_ = std::move(loadingShader);
     initialized_ = true;
 }
 
@@ -479,6 +490,22 @@ void AppMode::Tick() {
         if (world_) {
             TickWorld(deltaTime, now, options_.allowInput, true, true);
         }
+    } else if (state_ == GameState::Loading) {
+        if (world_) {
+            glm::vec3 playerPosition = world_->player.Position();
+            voxel::WorldBlockCoord playerBlock{
+                static_cast<int>(std::floor(playerPosition.x)),
+                static_cast<int>(std::floor(playerPosition.y)),
+                static_cast<int>(std::floor(playerPosition.z))};
+            voxel::ChunkCoord playerChunk = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
+            world_->streaming.Tick(playerChunk, world_->chunkRegistry, world_->mesher);
+            world_->workerPool.NotifyWork();
+            loadingProgress_ = GetLoadingProgress();
+            DrawLoadingScreen();
+            if (loadingProgress_ >= 1.0f) {
+                SetState(GameState::Playing);
+            }
+        }
     } else if (state_ == GameState::PauseMenu) {
         if (world_) {
             TickWorld(deltaTime, now, false, false, false);
@@ -501,6 +528,14 @@ void AppMode::Shutdown() {
     if (blockTexture_ != 0) {
         glad_glDeleteTextures(1, &blockTexture_);
         blockTexture_ = 0;
+    }
+    if (loadingVbo_ != 0) {
+        glad_glDeleteBuffers(1, &loadingVbo_);
+        loadingVbo_ = 0;
+    }
+    if (loadingVao_ != 0) {
+        glad_glDeleteVertexArrays(1, &loadingVao_);
+        loadingVao_ = 0;
     }
 }
 
@@ -604,11 +639,110 @@ void AppMode::UpdateMenuTitle(bool force) {
         const std::string_view title = loadMissing_ ? MenuModel::kMainMenuMissingTitle
                                                     : MenuModel::kMainMenuTitle;
         glfwSetWindowTitle(window_, std::string(title).c_str());
+    } else if (state_ == GameState::Loading) {
+        glfwSetWindowTitle(window_, std::string("[LOADING]").c_str());
     } else if (state_ == GameState::PauseMenu) {
         glfwSetWindowTitle(window_, std::string(MenuModel::kPauseMenuTitle).c_str());
     }
 
     lastTitleUpdate_ = now;
+}
+
+float AppMode::GetLoadingProgress() const {
+    if (!world_) {
+        return 0.0f;
+    }
+    const voxel::ChunkStreamingConfig& config = world_->streaming.Config();
+    const int radius = config.loadRadius;
+    const int minChunkY = voxel::WorldToChunkCoord(voxel::WorldBlockCoord{0, voxel::kWorldMinY, 0},
+                                                   voxel::kChunkSize)
+                              .y;
+    const int maxChunkY = voxel::WorldToChunkCoord(voxel::WorldBlockCoord{0, voxel::kWorldMaxY, 0},
+                                                   voxel::kChunkSize)
+                              .y;
+    const glm::vec3 playerPosition = world_->player.Position();
+    const voxel::WorldBlockCoord playerBlock{
+        static_cast<int>(std::floor(playerPosition.x)),
+        static_cast<int>(std::floor(playerPosition.y)),
+        static_cast<int>(std::floor(playerPosition.z))};
+    const voxel::ChunkCoord playerChunk = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
+    const int clampedPlayerY = std::clamp(playerChunk.y, minChunkY, maxChunkY);
+    const int minY = std::max(clampedPlayerY - config.verticalRadius, minChunkY);
+    const int maxY = std::min(clampedPlayerY + config.verticalRadius, maxChunkY);
+    const std::size_t layers = static_cast<std::size_t>(maxY - minY + 1);
+    const std::size_t total =
+        static_cast<std::size_t>((radius * 2 + 1) * (radius * 2 + 1)) * std::max<std::size_t>(layers, 1);
+    if (total == 0) {
+        return 1.0f;
+    }
+    const voxel::ChunkStreamingStats& stats = world_->streaming.Stats();
+    const float progress = static_cast<float>(stats.gpuReadyChunks) / static_cast<float>(total);
+    return std::clamp(progress, 0.0f, 1.0f);
+}
+
+void AppMode::DrawLoadingScreen() {
+    if (!loadingInitialized_) {
+        glad_glGenVertexArrays(1, &loadingVao_);
+        glad_glGenBuffers(1, &loadingVbo_);
+        glad_glBindVertexArray(loadingVao_);
+        glad_glBindBuffer(GL_ARRAY_BUFFER, loadingVbo_);
+        glad_glEnableVertexAttribArray(0);
+        glad_glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), static_cast<void*>(nullptr));
+        glad_glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glad_glBindVertexArray(0);
+        loadingInitialized_ = true;
+    }
+
+    glDisable(GL_DEPTH_TEST);
+    glClearColor(0.05f, 0.06f, 0.08f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    const float progress = std::clamp(loadingProgress_, 0.0f, 1.0f);
+    constexpr float barWidth = 0.6f;
+    constexpr float barHeight = 0.06f;
+    constexpr float inset = 0.008f;
+    const float filledWidth = (barWidth - inset * 2.0f) * progress;
+
+    auto uploadRect = [&](float left, float right, float bottom, float top) {
+        const std::array<float, 12> verts = {
+            left, bottom,
+            right, bottom,
+            right, top,
+            left, bottom,
+            right, top,
+            left, top,
+        };
+        glad_glBindBuffer(GL_ARRAY_BUFFER, loadingVbo_);
+        glad_glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(verts.size() * sizeof(float)), verts.data(),
+                          GL_DYNAMIC_DRAW);
+    };
+
+    loadingShader_.use();
+    glad_glBindVertexArray(loadingVao_);
+
+    const float halfWidth = barWidth * 0.5f;
+    const float halfHeight = barHeight * 0.5f;
+    const float left = -halfWidth;
+    const float right = halfWidth;
+    const float bottom = -halfHeight;
+    const float top = halfHeight;
+
+    uploadRect(left, right, bottom, top);
+    loadingShader_.setVec3("uColor", glm::vec3(0.18f, 0.2f, 0.24f));
+    glad_glDrawArrays(GL_TRIANGLES, 0, 6);
+
+    if (filledWidth > 0.0f) {
+        const float fillLeft = left + inset;
+        const float fillRight = fillLeft + filledWidth;
+        const float fillBottom = bottom + inset;
+        const float fillTop = top - inset;
+        uploadRect(fillLeft, fillRight, fillBottom, fillTop);
+        loadingShader_.setVec3("uColor", glm::vec3(0.35f, 0.75f, 0.4f));
+        glad_glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+
+    glad_glBindVertexArray(0);
+    glEnable(GL_DEPTH_TEST);
 }
 
 void AppMode::StartNewWorld(const std::string& worldId) {
@@ -628,7 +762,9 @@ void AppMode::StartNewWorld(const std::string& worldId) {
 
     gCamera.setPosition(kPlayerSpawn + kEyeOffset);
     loadMissing_ = false;
-    SetState(GameState::Playing);
+    loadingProgress_ = 0.0f;
+    loadingInitialized_ = false;
+    SetState(GameState::Loading);
 }
 
 void AppMode::StartLoadedWorld() {
