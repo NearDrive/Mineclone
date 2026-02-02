@@ -66,15 +66,15 @@ std::size_t WorkerPool::ThreadCount() const {
 
 void WorkerPool::WorkerLoop() {
     while (!stop_.load()) {
-        voxel::GenerateJob generateJob;
-        if (generateQueue_ && generateQueue_->try_pop(generateJob)) {
-            ExecuteGenerate(generateJob);
-            continue;
-        }
-
         voxel::MeshJob meshJob;
         if (meshQueue_ && meshQueue_->try_pop(meshJob)) {
             ExecuteMesh(meshJob);
+            continue;
+        }
+
+        voxel::GenerateJob generateJob;
+        if (generateQueue_ && generateQueue_->try_pop(generateJob)) {
+            ExecuteGenerate(generateJob);
             continue;
         }
 
@@ -158,10 +158,10 @@ void WorkerPool::ExecuteMesh(const voxel::MeshJob& job) {
     voxel::ChunkMeshCpu cpuMesh;
     mesher_->BuildMesh(job.coord, chunkCopy, *registry_, cpuMesh);
 
-    auto meshPayload = std::make_shared<voxel::ChunkMeshCpu>(std::move(cpuMesh));
-    readyQueue_->push(voxel::MeshReady{job.coord, job.entry, std::move(meshPayload)});
     entry->meshingState.store(voxel::MeshingState::Ready, std::memory_order_release);
     entry->gpuState.store(voxel::GpuState::UploadQueued, std::memory_order_release);
+    auto meshPayload = std::make_shared<voxel::ChunkMeshCpu>(std::move(cpuMesh));
+    readyQueue_->push(voxel::MeshReady{job.coord, job.entry, std::move(meshPayload)});
 }
 
 } // namespace core
