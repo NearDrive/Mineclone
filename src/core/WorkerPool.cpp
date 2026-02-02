@@ -158,10 +158,10 @@ void WorkerPool::ExecuteMesh(const voxel::MeshJob& job) {
     voxel::ChunkMeshCpu cpuMesh;
     mesher_->BuildMesh(job.coord, chunkCopy, *registry_, cpuMesh);
 
-    auto meshPayload = std::make_shared<voxel::ChunkMeshCpu>(std::move(cpuMesh));
-    readyQueue_->push(voxel::MeshReady{job.coord, job.entry, std::move(meshPayload)});
     entry->meshingState.store(voxel::MeshingState::Ready, std::memory_order_release);
     entry->gpuState.store(voxel::GpuState::UploadQueued, std::memory_order_release);
+    auto meshPayload = std::make_shared<voxel::ChunkMeshCpu>(std::move(cpuMesh));
+    readyQueue_->push(voxel::MeshReady{job.coord, job.entry, std::move(meshPayload)});
 }
 
 } // namespace core
