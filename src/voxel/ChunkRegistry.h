@@ -93,6 +93,7 @@ public:
     void EnsureLightForNeighborhood(const ChunkCoord& coord);
     void RebuildLightForChunk(const ChunkCoord& coord);
     void RebuildLightForNeighborhood(const ChunkCoord& coord);
+    void MarkLightDirty(const ChunkCoord& coord);
 
     std::size_t LoadedCount() const;
     std::size_t GpuReadyCount() const;

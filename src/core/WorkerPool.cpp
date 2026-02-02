@@ -143,16 +143,20 @@ void WorkerPool::ExecuteMesh(const voxel::MeshJob& job) {
         return;
     }
 
-    std::shared_lock<std::shared_mutex> chunkLock(entry->dataMutex);
-    const voxel::Chunk* chunk = entry->chunk.get();
-    if (!chunk) {
-        entry->meshingState.store(voxel::MeshingState::NotScheduled);
-        std::cout << "[Workers] Mesh job skipped; chunk missing.\n";
-        return;
+    voxel::Chunk chunkCopy;
+    {
+        std::shared_lock<std::shared_mutex> chunkLock(entry->dataMutex);
+        const voxel::Chunk* chunk = entry->chunk.get();
+        if (!chunk) {
+            entry->meshingState.store(voxel::MeshingState::NotScheduled);
+            std::cout << "[Workers] Mesh job skipped; chunk missing.\n";
+            return;
+        }
+        chunkCopy = *chunk;
     }
 
     voxel::ChunkMeshCpu cpuMesh;
-    mesher_->BuildMesh(job.coord, *chunk, *registry_, cpuMesh);
+    mesher_->BuildMesh(job.coord, chunkCopy, *registry_, cpuMesh);
 
     auto meshPayload = std::make_shared<voxel::ChunkMeshCpu>(std::move(cpuMesh));
     readyQueue_->push(voxel::MeshReady{job.coord, job.entry, std::move(meshPayload)});
