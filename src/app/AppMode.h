@@ -87,6 +87,7 @@ private:
     bool loadingInitialized_ = false;
     float loadingProgress_ = 0.0f;
     bool loadingFallbackActive_ = false;
+    bool loadingForceComplete_ = false;
     std::chrono::steady_clock::time_point lastLoadingLogTime_{};
     std::chrono::steady_clock::time_point lastLoadingProgressTime_{};
     std::chrono::steady_clock::time_point lastWorkerRestartTime_{};

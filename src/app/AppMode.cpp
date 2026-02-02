@@ -730,6 +730,11 @@ void AppMode::UpdateLoadingProgress() {
                      "uploads. (queues g/m/u "
                   << stats.createQueue << "/" << stats.meshQueue << "/" << stats.uploadQueue
                   << ", workers " << workerThreads << ").\n";
+        if (!loadingForceComplete_ && stats.generatedChunksReady >= total && stats.loadedChunks >= total) {
+            std::cout << "[Loading] Generated all chunks but mesh/GPU progress stalled; forcing load completion.\n";
+            loadingForceComplete_ = true;
+            loadingProgress_ = 1.0f;
+        }
         if (workerThreads == 0 && stats.meshQueue > 0 &&
             now - lastWorkerRestartTime_ >= std::chrono::seconds(5)) {
             std::cout << "[Loading] Restarting worker threads to unblock mesh queue.\n";
@@ -827,6 +832,7 @@ void AppMode::StartNewWorld(const std::string& worldId) {
     loadingProgress_ = 0.0f;
     loadingInitialized_ = false;
     loadingFallbackActive_ = false;
+    loadingForceComplete_ = false;
     lastLoadingLogTime_ = {};
     lastLoadingProgressTime_ = {};
     lastWorkerRestartTime_ = {};
