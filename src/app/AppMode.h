@@ -41,6 +41,8 @@ private:
 
     void HandleMenuInput();
     void HandlePlayingInput();
+    void DrawLoadingScreen();
+    float GetLoadingProgress() const;
 
     void UpdateMenuTitle(bool force);
 
@@ -81,12 +83,17 @@ private:
     bool smokeCompleted_ = false;
     bool smokeFailed_ = false;
     bool menuHintPrinted_ = false;
+    bool loadingInitialized_ = false;
+    float loadingProgress_ = 0.0f;
 
     struct WorldRuntime;
     std::unique_ptr<WorldRuntime> world_;
     Shader shader_;
     Shader debugShader_;
+    Shader loadingShader_;
     GLuint blockTexture_ = 0;
+    GLuint loadingVao_ = 0;
+    GLuint loadingVbo_ = 0;
 };
 
 } // namespace app
