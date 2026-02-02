@@ -54,6 +54,12 @@ bool ChunkStreaming::Enabled() const {
     return config_.enabled;
 }
 
+void ChunkStreaming::SetBudgets(int maxCreatesPerFrame, int maxMeshesPerFrame, int maxUploadsPerFrame) {
+    config_.maxChunkCreatesPerFrame = std::max(1, maxCreatesPerFrame);
+    config_.maxChunkMeshesPerFrame = std::max(1, maxMeshesPerFrame);
+    config_.maxGpuUploadsPerFrame = std::max(1, maxUploadsPerFrame);
+}
+
 void ChunkStreaming::Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry, const ChunkMesher& mesher) {
     stats_.playerChunk = playerChunk;
     stats_.createdThisFrame = 0;
