@@ -2,7 +2,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <queue>
 #include <shared_mutex>
 #include <utility>
@@ -14,6 +16,20 @@
 namespace voxel {
 
 namespace {
+
+std::string TimestampNow() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+    std::tm localTime{};
+#if defined(_WIN32)
+    localtime_s(&localTime, &nowTime);
+#else
+    localtime_r(&nowTime, &localTime);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&localTime, "%H:%M:%S");
+    return out.str();
+}
 
 bool IsOpaque(BlockId id) {
     switch (id) {
@@ -219,8 +235,9 @@ std::optional<ChunkReadHandle> ChunkRegistry::AcquireChunkRead(const ChunkCoord&
             std::int64_t previous = lastLogMs.load(std::memory_order_relaxed);
             if (nowMs - previous >= 1000 &&
                 lastLogMs.compare_exchange_strong(previous, nowMs, std::memory_order_relaxed)) {
-                std::cerr << "[ChunkRegistry] AcquireChunkRead failed for chunk (" << coord.x << ", " << coord.y << ", "
-                          << coord.z << "): entry=set state="
+                std::cerr << "[" << TimestampNow()
+                          << "] [ChunkRegistry] AcquireChunkRead failed for chunk (" << coord.x << ", " << coord.y
+                          << ", " << coord.z << "): entry=set state="
                           << static_cast<int>(entry->generationState.load(std::memory_order_acquire)) << '\n';
             }
         }
@@ -234,8 +251,8 @@ std::optional<ChunkReadHandle> ChunkRegistry::AcquireChunkRead(const ChunkCoord&
     handle.chunk = entry->chunk.get();
     if (!handle.chunk) {
 #ifndef NDEBUG
-        std::cerr << "[ChunkRegistry] AcquireChunkRead failed for chunk (" << coord.x << ", " << coord.y << ", "
-                  << coord.z << "): entry=set state="
+        std::cerr << "[" << TimestampNow() << "] [ChunkRegistry] AcquireChunkRead failed for chunk (" << coord.x
+                  << ", " << coord.y << ", " << coord.z << "): entry=set state="
                   << static_cast<int>(entry->generationState.load(std::memory_order_acquire))
                   << " chunk=null\n";
 #endif

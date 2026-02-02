@@ -71,6 +71,20 @@ const glm::vec3 kPlayerSpawn = []() {
 }();
 const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
 
+std::string TimestampNow() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+    std::tm localTime{};
+#if defined(_WIN32)
+    localtime_s(&localTime, &nowTime);
+#else
+    localtime_r(&nowTime, &localTime);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&localTime, "%H:%M:%S");
+    return out.str();
+}
+
 GLuint CreateTextureFromPixels(int width, int height, const std::vector<std::uint8_t>& pixels) {
     if (width <= 0 || height <= 0 || pixels.empty()) {
         return 0;
@@ -725,7 +739,7 @@ void AppMode::UpdateLoadingProgress() {
     const auto now = std::chrono::steady_clock::now();
     if (now - lastLoadingLogTime_ >= std::chrono::seconds(1)) {
         const std::size_t workerThreads = world_->workerPool.ThreadCount();
-        std::cout << "[Loading] Ready GPU " << stats.gpuReadyChunks << "/" << total
+        std::cout << "[" << TimestampNow() << "] [Loading] Ready GPU " << stats.gpuReadyChunks << "/" << total
                   << ", meshed " << stats.meshedCpuReady << ", generated " << stats.generatedChunksReady
                   << ", loaded " << stats.loadedChunks << " (queues g/m/u "
                   << stats.createQueue << "/" << stats.meshQueue << "/" << stats.uploadQueue
@@ -742,18 +756,20 @@ void AppMode::UpdateLoadingProgress() {
     }
     if (now - lastLoadingProgressTime_ >= std::chrono::seconds(5)) {
         const std::size_t workerThreads = world_->workerPool.ThreadCount();
-        std::cout << "[Loading] Warning: no progress in GPU or mesh counts for 5s; check worker threads and OpenGL "
+        std::cout << "[" << TimestampNow()
+                  << "] [Loading] Warning: no progress in GPU or mesh counts for 5s; check worker threads and OpenGL "
                      "uploads. (queues g/m/u "
                   << stats.createQueue << "/" << stats.meshQueue << "/" << stats.uploadQueue
                   << ", workers " << workerThreads << ").\n";
         if (!loadingForceComplete_ && stats.generatedChunksReady >= total && stats.loadedChunks >= total) {
-            std::cout << "[Loading] Generated all chunks but mesh/GPU progress stalled; forcing load completion.\n";
+            std::cout << "[" << TimestampNow()
+                      << "] [Loading] Generated all chunks but mesh/GPU progress stalled; forcing load completion.\n";
             loadingForceComplete_ = true;
             loadingProgress_ = 1.0f;
         }
         if (workerThreads == 0 && stats.meshQueue > 0 &&
             now - lastWorkerRestartTime_ >= std::chrono::seconds(5)) {
-            std::cout << "[Loading] Restarting worker threads to unblock mesh queue.\n";
+            std::cout << "[" << TimestampNow() << "] [Loading] Restarting worker threads to unblock mesh queue.\n";
             world_->StartWorkers(world_->workerThreadsTarget);
             lastWorkerRestartTime_ = now;
         }
