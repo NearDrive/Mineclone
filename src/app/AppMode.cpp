@@ -51,11 +51,17 @@ constexpr int kRenderRadiusMax = 32;
 constexpr int kLoadRadiusDefault = 10;
 constexpr int kLoadRadiusMin = kRenderRadiusMin;
 constexpr int kLoadRadiusMax = 48;
+constexpr int kChunkCreatesPerFrameDefault = 3;
+constexpr int kChunkMeshesPerFrameDefault = 2;
+constexpr int kGpuUploadsPerFrameDefault = 3;
+constexpr int kLoadingChunkCreatesPerFrame = 128;
+constexpr int kLoadingChunkMeshesPerFrame = 64;
+constexpr int kLoadingGpuUploadsPerFrame = 128;
 constexpr float kReachDistance = 6.0f;
 constexpr float kHighlightEpsilon = 0.015f;
 constexpr float kMaxDeltaTime = 0.05f;
 constexpr float kSmokeDeltaTime = 1.0f / 60.0f;
-constexpr int kWorkerThreadsDefault = 2;
+constexpr int kWorkerThreadsDefault = 6;
 constexpr int kSmokeMenuWorldFrames = 60;
 constexpr std::string_view kWorldPrefix = "world_";
 const glm::vec3 kPlayerSpawn = []() {
@@ -64,6 +70,20 @@ const glm::vec3 kPlayerSpawn = []() {
     return glm::vec3(0.0f, static_cast<float>(spawnY), 0.0f);
 }();
 const glm::vec3 kEyeOffset(0.0f, 1.6f, 0.0f);
+
+std::string TimestampNow() {
+    const auto now = std::chrono::system_clock::now();
+    const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+    std::tm localTime{};
+#if defined(_WIN32)
+    localtime_s(&localTime, &nowTime);
+#else
+    localtime_r(&nowTime, &localTime);
+#endif
+    std::ostringstream out;
+    out << std::put_time(&localTime, "%H:%M:%S");
+    return out.str();
+}
 
 GLuint CreateTextureFromPixels(int width, int height, const std::vector<std::uint8_t>& pixels) {
     if (width <= 0 || height <= 0 || pixels.empty()) {
@@ -293,9 +313,9 @@ struct AppMode::WorldRuntime {
         voxel::ChunkStreamingConfig config;
         config.renderRadius = kRenderRadiusDefault;
         config.loadRadius = kLoadRadiusDefault;
-        config.maxChunkCreatesPerFrame = 3;
-        config.maxChunkMeshesPerFrame = 2;
-        config.maxGpuUploadsPerFrame = 3;
+        config.maxChunkCreatesPerFrame = kChunkCreatesPerFrameDefault;
+        config.maxChunkMeshesPerFrame = kChunkMeshesPerFrameDefault;
+        config.maxGpuUploadsPerFrame = kGpuUploadsPerFrameDefault;
         config.workerThreads = workerThreads;
         return config;
     }
@@ -564,6 +584,11 @@ void AppMode::SetState(GameState state) {
     if (state_ == GameState::Playing) {
         SetMouseCapture(window_, options_.allowInput);
         loadMissing_ = false;
+        if (world_) {
+            world_->streaming.SetBudgets(kChunkCreatesPerFrameDefault,
+                                         kChunkMeshesPerFrameDefault,
+                                         kGpuUploadsPerFrameDefault);
+        }
     } else {
         SetMouseCapture(window_, false);
     }
@@ -644,6 +669,11 @@ void AppMode::UpdateMenuTitle(bool force) {
                                                     : MenuModel::kMainMenuTitle;
         glfwSetWindowTitle(window_, std::string(title).c_str());
     } else if (state_ == GameState::Loading) {
+        if (world_) {
+            world_->streaming.SetBudgets(kLoadingChunkCreatesPerFrame,
+                                         kLoadingChunkMeshesPerFrame,
+                                         kLoadingGpuUploadsPerFrame);
+        }
         glfwSetWindowTitle(window_, std::string("[LOADING]").c_str());
     } else if (state_ == GameState::PauseMenu) {
         glfwSetWindowTitle(window_, std::string(MenuModel::kPauseMenuTitle).c_str());
@@ -709,7 +739,7 @@ void AppMode::UpdateLoadingProgress() {
     const auto now = std::chrono::steady_clock::now();
     if (now - lastLoadingLogTime_ >= std::chrono::seconds(1)) {
         const std::size_t workerThreads = world_->workerPool.ThreadCount();
-        std::cout << "[Loading] Ready GPU " << stats.gpuReadyChunks << "/" << total
+        std::cout << "[" << TimestampNow() << "] [Loading] Ready GPU " << stats.gpuReadyChunks << "/" << total
                   << ", meshed " << stats.meshedCpuReady << ", generated " << stats.generatedChunksReady
                   << ", loaded " << stats.loadedChunks << " (queues g/m/u "
                   << stats.createQueue << "/" << stats.meshQueue << "/" << stats.uploadQueue
@@ -726,18 +756,20 @@ void AppMode::UpdateLoadingProgress() {
     }
     if (now - lastLoadingProgressTime_ >= std::chrono::seconds(5)) {
         const std::size_t workerThreads = world_->workerPool.ThreadCount();
-        std::cout << "[Loading] Warning: no progress in GPU or mesh counts for 5s; check worker threads and OpenGL "
+        std::cout << "[" << TimestampNow()
+                  << "] [Loading] Warning: no progress in GPU or mesh counts for 5s; check worker threads and OpenGL "
                      "uploads. (queues g/m/u "
                   << stats.createQueue << "/" << stats.meshQueue << "/" << stats.uploadQueue
                   << ", workers " << workerThreads << ").\n";
         if (!loadingForceComplete_ && stats.generatedChunksReady >= total && stats.loadedChunks >= total) {
-            std::cout << "[Loading] Generated all chunks but mesh/GPU progress stalled; forcing load completion.\n";
+            std::cout << "[" << TimestampNow()
+                      << "] [Loading] Generated all chunks but mesh/GPU progress stalled; forcing load completion.\n";
             loadingForceComplete_ = true;
             loadingProgress_ = 1.0f;
         }
         if (workerThreads == 0 && stats.meshQueue > 0 &&
             now - lastWorkerRestartTime_ >= std::chrono::seconds(5)) {
-            std::cout << "[Loading] Restarting worker threads to unblock mesh queue.\n";
+            std::cout << "[" << TimestampNow() << "] [Loading] Restarting worker threads to unblock mesh queue.\n";
             world_->StartWorkers(world_->workerThreadsTarget);
             lastWorkerRestartTime_ = now;
         }
