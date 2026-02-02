@@ -55,6 +55,7 @@ public:
 
     void SetEnabled(bool enabled);
     bool Enabled() const;
+    void SetBudgets(int maxCreatesPerFrame, int maxMeshesPerFrame, int maxUploadsPerFrame);
 
     void Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry, const ChunkMesher& mesher);
     void SetProfiler(core::Profiler* profiler);
