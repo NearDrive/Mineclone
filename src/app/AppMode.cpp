@@ -708,10 +708,12 @@ void AppMode::UpdateLoadingProgress() {
 
     const auto now = std::chrono::steady_clock::now();
     if (now - lastLoadingLogTime_ >= std::chrono::seconds(1)) {
+        const std::size_t workerThreads = world_->workerPool.ThreadCount();
         std::cout << "[Loading] Ready GPU " << stats.gpuReadyChunks << "/" << total
                   << ", meshed " << stats.meshedCpuReady << ", generated " << stats.generatedChunksReady
                   << ", loaded " << stats.loadedChunks << " (queues g/m/u "
                   << stats.createQueue << "/" << stats.meshQueue << "/" << stats.uploadQueue
+                  << ", workers " << workerThreads
                   << ", progress " << static_cast<int>(loadingProgress_ * 100.0f) << "%).\n";
         lastLoadingLogTime_ = now;
     }
@@ -723,8 +725,17 @@ void AppMode::UpdateLoadingProgress() {
         lastLoadingProgressTime_ = now;
     }
     if (now - lastLoadingProgressTime_ >= std::chrono::seconds(5)) {
+        const std::size_t workerThreads = world_->workerPool.ThreadCount();
         std::cout << "[Loading] Warning: no progress in GPU or mesh counts for 5s; check worker threads and OpenGL "
-                     "uploads.\n";
+                     "uploads. (queues g/m/u "
+                  << stats.createQueue << "/" << stats.meshQueue << "/" << stats.uploadQueue
+                  << ", workers " << workerThreads << ").\n";
+        if (workerThreads == 0 && stats.meshQueue > 0 &&
+            now - lastWorkerRestartTime_ >= std::chrono::seconds(5)) {
+            std::cout << "[Loading] Restarting worker threads to unblock mesh queue.\n";
+            world_->StartWorkers(world_->workerThreadsTarget);
+            lastWorkerRestartTime_ = now;
+        }
         lastLoadingProgressTime_ = now;
     }
     lastLoadingGpuReady_ = stats.gpuReadyChunks;
@@ -818,6 +829,7 @@ void AppMode::StartNewWorld(const std::string& worldId) {
     loadingFallbackActive_ = false;
     lastLoadingLogTime_ = {};
     lastLoadingProgressTime_ = {};
+    lastWorkerRestartTime_ = {};
     lastLoadingGpuReady_ = 0;
     lastLoadingMeshed_ = 0;
     SetState(GameState::Loading);

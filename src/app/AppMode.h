@@ -89,6 +89,7 @@ private:
     bool loadingFallbackActive_ = false;
     std::chrono::steady_clock::time_point lastLoadingLogTime_{};
     std::chrono::steady_clock::time_point lastLoadingProgressTime_{};
+    std::chrono::steady_clock::time_point lastWorkerRestartTime_{};
     std::size_t lastLoadingGpuReady_ = 0;
     std::size_t lastLoadingMeshed_ = 0;
 
