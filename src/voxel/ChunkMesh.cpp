@@ -10,6 +10,9 @@
 #ifndef GL_UNSIGNED_INT
 #define GL_UNSIGNED_INT 0x1405
 #endif
+#ifndef GL_STREAM_DRAW
+#define GL_STREAM_DRAW 0x88E0
+#endif
 
 namespace voxel {
 
@@ -76,7 +79,7 @@ void ChunkMesh::UploadToGpu(bool orphan) {
     if (orphan) {
         glad_glBufferData(GL_ARRAY_BUFFER, vertexBytes, nullptr, GL_STREAM_DRAW);
         if (vertexBytes > 0) {
-            glad_glBufferSubData(GL_ARRAY_BUFFER, 0, vertexBytes, vertices_.data());
+            glad_glBufferData(GL_ARRAY_BUFFER, vertexBytes, vertices_.data(), GL_STREAM_DRAW);
         }
     } else {
         glad_glBufferData(GL_ARRAY_BUFFER, vertexBytes, vertices_.data(), GL_STATIC_DRAW);
@@ -87,7 +90,7 @@ void ChunkMesh::UploadToGpu(bool orphan) {
     if (orphan) {
         glad_glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBytes, nullptr, GL_STREAM_DRAW);
         if (indexBytes > 0) {
-            glad_glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, indexBytes, indices_.data());
+            glad_glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBytes, indices_.data(), GL_STREAM_DRAW);
         }
     } else {
         glad_glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBytes, indices_.data(), GL_STATIC_DRAW);
