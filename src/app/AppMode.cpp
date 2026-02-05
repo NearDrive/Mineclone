@@ -55,7 +55,6 @@ constexpr int kSmokeMenuWorldFrames = 60;
 constexpr float kLoadingMinDisplaySeconds = 0.2f;
 constexpr float kLoadingMaxWaitSeconds = 300.0f;
 constexpr float kLoadingReadyFraction = 0.6f;
-constexpr int kLoadingBarSegments = 48;
 constexpr std::string_view kWorldPrefix = "world_";
 const glm::vec3 kPlayerSpawn = []() {
     const int surfaceHeight = voxel::GetSurfaceHeight(0, 0);
@@ -786,38 +785,57 @@ void AppMode::TickLoading(const std::chrono::steady_clock::time_point& now) {
         return;
     }
 
-    TickWorld(kSmokeDeltaTime, now, false, true, false);
+    glm::vec3 playerPosition = world_->player.Position();
+    voxel::WorldBlockCoord playerBlock{
+        static_cast<int>(std::floor(playerPosition.x)),
+        static_cast<int>(std::floor(playerPosition.y)),
+        static_cast<int>(std::floor(playerPosition.z))};
+    voxel::ChunkCoord playerChunk = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
+    world_->streaming.Tick(playerChunk, world_->chunkRegistry, world_->mesher);
+    world_->workerPool.NotifyWork();
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     const float progress = ComputeLoadingProgress();
     const int percent = static_cast<int>(std::round(progress * 100.0f));
     const std::string loadingTitle = BuildLoadingTitle(percent);
     glfwSetWindowTitle(window_, loadingTitle.c_str());
 
-    const float left = -0.65f;
-    const float right = 0.65f;
-    const float top = -0.82f;
-    const float bottom = -0.90f;
-    const float innerPadding = 0.012f;
-    const float fillLeft = left + innerPadding;
-    const float fillRightMax = right - innerPadding;
-    const float fillWidth = std::max(0.0f, fillRightMax - fillLeft);
-    const float fillRight = fillLeft + fillWidth * std::clamp(progress, 0.0f, 1.0f);
+    const float left = -0.66f;
+    const float right = 0.66f;
+    const float top = -0.80f;
+    const float bottom = -0.92f;
+    const float borderInset = 0.012f;
+    const float innerLeft = left + borderInset;
+    const float innerRight = right - borderInset;
+    const float innerTop = top - borderInset;
+    const float innerBottom = bottom + borderInset;
+    const float fillRight = innerLeft + std::max(0.0f, innerRight - innerLeft) * std::clamp(progress, 0.0f, 1.0f);
 
     std::vector<glm::vec3> barVertices = {
         {left, top, 0.0f}, {right, top, 0.0f},
         {right, top, 0.0f}, {right, bottom, 0.0f},
         {right, bottom, 0.0f}, {left, bottom, 0.0f},
         {left, bottom, 0.0f}, {left, top, 0.0f},
+
+        {innerLeft, innerTop, 0.0f}, {innerRight, innerTop, 0.0f},
+        {innerRight, innerTop, 0.0f}, {innerRight, innerBottom, 0.0f},
+        {innerRight, innerBottom, 0.0f}, {innerLeft, innerBottom, 0.0f},
+        {innerLeft, innerBottom, 0.0f}, {innerLeft, innerTop, 0.0f},
     };
 
-    if (fillRight > fillLeft) {
-        const float innerTop = top - innerPadding;
-        const float innerBottom = bottom + innerPadding;
-        for (int i = 0; i <= kLoadingBarSegments; ++i) {
-            const float t = static_cast<float>(i) / static_cast<float>(kLoadingBarSegments);
-            const float x = fillLeft + t * (fillRight - fillLeft);
-            barVertices.push_back({x, innerTop, 0.0f});
-            barVertices.push_back({x, innerBottom, 0.0f});
+    if (fillRight > innerLeft) {
+        const float stripeSpan = 0.10f;
+        const float stripeSpacing = 0.14f;
+        const std::chrono::duration<float> elapsed = now - loadingStartedAt_;
+        const float animPhase = std::fmod(elapsed.count() * 0.35f, stripeSpacing);
+
+        for (float x = innerLeft - stripeSpan + animPhase; x < fillRight; x += stripeSpacing) {
+            const float x0 = std::max(innerLeft, x);
+            const float x1 = std::min(fillRight, x + stripeSpan);
+            barVertices.push_back({x0, innerBottom, 0.0f});
+            barVertices.push_back({x1, innerTop, 0.0f});
         }
     }
 
@@ -827,8 +845,13 @@ void AppMode::TickLoading(const std::chrono::steady_clock::time_point& now) {
         debugShader_.use();
         debugShader_.setMat4("uProjection", glm::mat4(1.0f));
         debugShader_.setMat4("uView", glm::mat4(1.0f));
-        debugShader_.setVec3("uColor", glm::vec3(0.85f, 0.95f, 1.0f));
+        const glm::vec3 startColor(0.58f, 0.36f, 0.98f);
+        const glm::vec3 endColor(0.20f, 0.92f, 0.96f);
+        const glm::vec3 barColor = glm::mix(startColor, endColor, std::clamp(progress, 0.0f, 1.0f));
+        debugShader_.setVec3("uColor", barColor);
+        glLineWidth(2.0f);
         loadingBarDraw_.Draw();
+        glLineWidth(1.0f);
         glEnable(GL_DEPTH_TEST);
     }
 
