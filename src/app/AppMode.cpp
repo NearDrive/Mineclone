@@ -849,9 +849,8 @@ void AppMode::TickLoading(const std::chrono::steady_clock::time_point& now) {
         const glm::vec3 endColor(0.20f, 0.92f, 0.96f);
         const glm::vec3 barColor = glm::mix(startColor, endColor, std::clamp(progress, 0.0f, 1.0f));
         debugShader_.setVec3("uColor", barColor);
-        glLineWidth(2.0f);
+        // glLineWidth is not available with the current GL loader.
         loadingBarDraw_.Draw();
-        glLineWidth(1.0f);
         glEnable(GL_DEPTH_TEST);
     }
 
