@@ -115,14 +115,17 @@ bool ChunkStreaming::RequestRemesh(const ChunkCoord& coord, ChunkRegistry& regis
     }
 
     MeshingState state = entry->meshingState.load(std::memory_order_acquire);
-    while (state == MeshingState::NotScheduled || state == MeshingState::Ready) {
-        if (entry->meshingState.compare_exchange_weak(state, MeshingState::Queued)) {
-            meshQueue_.push(MeshJob{coord, entry, DetailTierForCoord(coord)});
+    while (true) {
+        if (state == MeshingState::Meshing || state == MeshingState::Queued) {
+            return false;
+        }
+        if (entry->meshingState.compare_exchange_weak(state, MeshingState::Queued,
+                                                      std::memory_order_acq_rel,
+                                                      std::memory_order_acquire)) {
+            meshQueue_.push_front(MeshJob{coord, entry, MeshDetailTier::Near});
             return true;
         }
     }
-
-    return false;
 }
 
 void ChunkStreaming::BuildDesiredSet(const ChunkCoord& playerChunk) {
