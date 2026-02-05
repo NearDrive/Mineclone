@@ -62,6 +62,9 @@ void ChunkStreaming::Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry
     stats_.meshedThisFrame = 0;
     stats_.uploadedThisFrame = 0;
     stats_.uploadedBytesThisFrame = 0;
+    stats_.regionsUploadedThisFrame = 0;
+    stats_.regionUploadedIndicesThisFrame = 0;
+    stats_.regionDeferredThisFrame = 0;
 
     if (!config_.enabled) {
         UpdateStats(registry);
@@ -399,7 +402,50 @@ void ChunkStreaming::BuildDirtyRegionList() {
 
 void ChunkStreaming::ProcessRegionUploads(ChunkRegistry& registry) {
     BuildDirtyRegionList();
+
+    std::sort(dirtyRegions_.begin(), dirtyRegions_.end(), [&](const RegionCoord& a, const RegionCoord& b) {
+        const int aMinChunkX = a.x * kRegionSizeChunksX;
+        const int aMinChunkZ = a.z * kRegionSizeChunksZ;
+        const int aMaxChunkX = aMinChunkX + (kRegionSizeChunksX - 1);
+        const int aMaxChunkZ = aMinChunkZ + (kRegionSizeChunksZ - 1);
+        const int bMinChunkX = b.x * kRegionSizeChunksX;
+        const int bMinChunkZ = b.z * kRegionSizeChunksZ;
+        const int bMaxChunkX = bMinChunkX + (kRegionSizeChunksX - 1);
+        const int bMaxChunkZ = bMinChunkZ + (kRegionSizeChunksZ - 1);
+
+        const int adx = std::max({stats_.playerChunk.x - aMaxChunkX, 0, aMinChunkX - stats_.playerChunk.x});
+        const int adz = std::max({stats_.playerChunk.z - aMaxChunkZ, 0, aMinChunkZ - stats_.playerChunk.z});
+        const int bdx = std::max({stats_.playerChunk.x - bMaxChunkX, 0, bMinChunkX - stats_.playerChunk.x});
+        const int bdz = std::max({stats_.playerChunk.z - bMaxChunkZ, 0, bMinChunkZ - stats_.playerChunk.z});
+
+        const int aChebyshev = std::max(adx, adz);
+        const int bChebyshev = std::max(bdx, bdz);
+        if (aChebyshev != bChebyshev) {
+            return aChebyshev < bChebyshev;
+        }
+
+        const int aManhattan = adx + adz;
+        const int bManhattan = bdx + bdz;
+        if (aManhattan != bManhattan) {
+            return aManhattan < bManhattan;
+        }
+
+        if (a.x != b.x) {
+            return a.x < b.x;
+        }
+        return a.z < b.z;
+    });
+
+    const int maxRegions = std::max(0, config_.maxRegionUploadsPerFrame);
+    const std::size_t maxIndices = config_.maxRegionUploadIndicesPerFrame;
+    std::size_t uploadedIndices = 0;
+
     for (const RegionCoord& coord : dirtyRegions_) {
+        if (stats_.regionsUploadedThisFrame >= maxRegions) {
+            ++stats_.regionDeferredThisFrame;
+            continue;
+        }
+
         auto regionIt = regions_.find(coord);
         if (regionIt == regions_.end()) {
             continue;
@@ -415,7 +461,7 @@ void ChunkStreaming::ProcessRegionUploads(ChunkRegistry& registry) {
             }
         }
 
-        region.chunks.clear();
+        std::unordered_set<ChunkCoord, ChunkCoordHash> rebuiltChunks;
         ChunkMeshCpu merged;
         for (const ChunkCoord& chunkCoord : chunksToKeep) {
             auto entry = registry.TryGetEntry(chunkCoord);
@@ -434,9 +480,17 @@ void ChunkStreaming::ProcessRegionUploads(ChunkRegistry& registry) {
             for (std::uint32_t index : entry->cpuMesh.indices) {
                 merged.indices.push_back(baseVertex + index);
             }
-            region.chunks.insert(chunkCoord);
+            rebuiltChunks.insert(chunkCoord);
         }
 
+        const std::size_t mergedIndices = merged.indices.size();
+        const bool fitsIndexBudget = maxIndices == 0 || uploadedIndices + mergedIndices <= maxIndices;
+        if (!fitsIndexBudget && stats_.regionsUploadedThisFrame > 0) {
+            ++stats_.regionDeferredThisFrame;
+            continue;
+        }
+
+        region.chunks = std::move(rebuiltChunks);
         region.mesh.Clear();
         if (!merged.indices.empty()) {
             region.mesh.Vertices() = std::move(merged.vertices);
@@ -449,7 +503,12 @@ void ChunkStreaming::ProcessRegionUploads(ChunkRegistry& registry) {
         if (region.chunks.empty()) {
             region.mesh.DestroyGpu();
         }
+
+        ++stats_.regionsUploadedThisFrame;
+        uploadedIndices += mergedIndices;
     }
+
+    stats_.regionUploadedIndicesThisFrame = uploadedIndices;
 }
 
 void ChunkStreaming::UpdateStats(const ChunkRegistry& registry) {

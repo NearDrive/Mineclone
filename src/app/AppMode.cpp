@@ -302,6 +302,7 @@ struct AppMode::WorldRuntime {
         config.maxChunkCreatesPerFrame = 3;
         config.maxChunkMeshesPerFrame = 2;
         config.maxGpuUploadsPerFrame = 3;
+        config.maxRegionUploadsPerFrame = 2;
         config.workerThreads = workerThreads;
         return config;
     }
@@ -383,6 +384,9 @@ struct AppMode::WorldRuntime {
     int lastCreates = 0;
     int lastMeshes = 0;
     int lastUploads = 0;
+    int lastRegionUploads = 0;
+    std::size_t lastRegionUploadIndices = 0;
+    std::size_t lastRegionDeferred = 0;
     int frames = 0;
 
     int workerThreadsTarget = kWorkerThreadsDefault;
@@ -1198,6 +1202,9 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
     world_->lastCreates = streamStats.createdThisFrame;
     world_->lastMeshes = streamStats.meshedThisFrame;
     world_->lastUploads = streamStats.uploadedThisFrame;
+    world_->lastRegionUploads = streamStats.regionsUploadedThisFrame;
+    world_->lastRegionUploadIndices = streamStats.regionUploadedIndicesThisFrame;
+    world_->lastRegionDeferred = streamStats.regionDeferredThisFrame;
     world_->lastDrawnChunks = drawn;
     world_->lastFrustumCulled = frustumCulled;
     world_->lastDistanceCulled = distanceCulled;
@@ -1246,6 +1253,8 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
                       << " | GPU: " << world_->lastGpuReadyChunks
                       << " | Q: " << world_->lastCreateQueue << "/" << world_->lastMeshQueue << "/"
                       << world_->lastUploadQueue
+                      << " | RUp: " << world_->lastRegionUploads << "/" << world_->lastRegionDeferred
+                      << " (idx " << world_->lastRegionUploadIndices << ")"
                       << " | Drawn: " << world_->lastDrawnChunks;
             }
 
@@ -1275,7 +1284,9 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
                              << " loaded " << world_->lastLoadedChunks
                              << " gpu " << world_->lastGpuReadyChunks
                              << " q " << world_->lastCreateQueue << "/" << world_->lastMeshQueue << "/"
-                             << world_->lastUploadQueue;
+                             << world_->lastUploadQueue
+                             << " rup " << world_->lastRegionUploads << "/" << world_->lastRegionDeferred
+                             << " ridx " << world_->lastRegionUploadIndices;
                     std::cout << perfLine.str() << '\n';
                     world_->lastStatsPrint = now;
                 }
