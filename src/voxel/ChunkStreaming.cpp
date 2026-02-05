@@ -548,7 +548,9 @@ void ChunkStreaming::ProcessRegionUploads(ChunkRegistry& registry) {
         }
 
         region.mesh.UploadToGpu();
-        region.mesh.ClearCpu();
+        // Keep CPU-side mesh buffers alive because chunkSpans stores offsets into these arrays.
+        // Clearing them here leaves stale span offsets that can trigger iterator assertions when
+        // a subsequent dirty update erases/rebuilds a chunk's span.
         region.dirty = false;
         region.dirtyChunks.clear();
 
