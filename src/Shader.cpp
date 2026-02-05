@@ -157,3 +157,10 @@ void Shader::setInt(const std::string& name, int value) const {
         glad_glUniform1i(location, value);
     }
 }
+
+void Shader::setFloat(const std::string& name, float value) const {
+    GLint location = glGetUniformLocation(programId_, name.c_str());
+    if (location >= 0) {
+        glUniform1f(location, value);
+    }
+}
