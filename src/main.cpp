@@ -1182,7 +1182,7 @@ int main(int argc, char** argv) {
             shader.setMat4("uProjection", projection);
             shader.setMat4("uView", view);
             shader.setVec3("uLightDir", lightDir);
-            shader.setVec3("uCameraPos", gCamera.getPosition());
+            shader.setVec3("uCameraPos", app::gCamera.getPosition());
             shader.setVec3("uFogColor", glm::vec3(0.08f, 0.10f, 0.15f));
             const float fogEnd = static_cast<float>(streaming.RenderRadius() * voxel::kChunkSize);
             shader.setFloat("uFogStart", fogEnd * 0.6f);
