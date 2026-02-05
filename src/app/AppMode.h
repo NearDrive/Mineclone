@@ -38,6 +38,10 @@ public:
 private:
     void InitializeShaders();
     void InitializeTextures();
+    void InitializePostProcessResources();
+    bool EnsurePostProcessTarget(int width, int height);
+    void DestroyPostProcessTarget();
+    void DrawPostProcessPass();
     void SetState(GameState state);
 
     void HandleMenuInput();
@@ -91,8 +95,17 @@ private:
     std::unique_ptr<WorldRuntime> world_;
     Shader shader_;
     Shader debugShader_;
+    Shader postProcessShader_;
     DebugDraw loadingBarDraw_;
     GLuint blockTexture_ = 0;
+    GLuint postProcessFbo_ = 0;
+    GLuint postProcessColorTexture_ = 0;
+    GLuint postProcessDepthStencilRbo_ = 0;
+    GLuint postProcessQuadVao_ = 0;
+    GLuint postProcessQuadVbo_ = 0;
+    int postProcessWidth_ = 0;
+    int postProcessHeight_ = 0;
+    bool postProcessAvailable_ = false;
 };
 
 } // namespace app
