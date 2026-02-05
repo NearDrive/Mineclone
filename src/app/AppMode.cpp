@@ -50,6 +50,11 @@ constexpr float kReachDistance = 6.0f;
 constexpr float kHighlightEpsilon = 0.015f;
 constexpr float kMaxDeltaTime = 0.05f;
 constexpr float kSmokeDeltaTime = 1.0f / 60.0f;
+constexpr glm::vec3 kFogColorBase(0.08f, 0.10f, 0.15f);
+constexpr float kFogStartRatio = 0.70f;
+constexpr float kFogEndPaddingChunks = 0.75f;
+constexpr float kFogDensity = 0.0028f;
+constexpr float kFogHeightFalloff = 0.018f;
 constexpr int kWorkerThreadsDefault = 2;
 constexpr int kSmokeMenuWorldFrames = 60;
 constexpr float kLoadingMinDisplaySeconds = 0.2f;
@@ -1025,7 +1030,7 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
         gCamera.setPosition(world_->player.Position() + kEyeOffset);
     }
 
-    glClearColor(0.08f, 0.10f, 0.15f, 1.0f);
+    glClearColor(kFogColorBase.r, kFogColorBase.g, kFogColorBase.b, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     int width = 0;
@@ -1095,10 +1100,21 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
         }
     }
 
+    const int renderRadiusChunks = world_->streaming.RenderRadius();
+    const float chunkSize = static_cast<float>(voxel::kChunkSize);
+    const float cullDistance = (static_cast<float>(renderRadiusChunks) + 1.0f) * chunkSize;
+    const float fogStart = cullDistance * kFogStartRatio;
+    const float fogEnd = cullDistance + kFogEndPaddingChunks * chunkSize;
+
     shader_.use();
     shader_.setMat4("uProjection", world_->projection);
     shader_.setMat4("uView", world_->view);
     shader_.setVec3("uLightDir", world_->lightDir);
+    shader_.setVec3("uFogColor", kFogColorBase);
+    shader_.setFloat("uFogDensity", kFogDensity);
+    shader_.setFloat("uFogStart", fogStart);
+    shader_.setFloat("uFogEnd", fogEnd);
+    shader_.setFloat("uFogHeightFalloff", kFogHeightFalloff);
     shader_.setInt("uTexture", 0);
     glad_glActiveTexture(GL_TEXTURE0);
     glad_glBindTexture(GL_TEXTURE_2D, blockTexture_);
@@ -1118,8 +1134,6 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
     std::size_t distanceCulled = 0;
     std::size_t frustumCulled = 0;
     std::size_t drawn = 0;
-
-    const int renderRadiusChunks = world_->streaming.RenderRadius();
 
     const std::vector<voxel::RegionCoord> drawableRegions = world_->streaming.CollectDrawableRegions(playerChunk);
     for (const voxel::RegionCoord& regionCoord : drawableRegions) {
