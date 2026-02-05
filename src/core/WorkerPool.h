@@ -11,6 +11,10 @@
 #include "core/ThreadSafeQueue.h"
 #include "voxel/ChunkJobs.h"
 
+namespace persistence {
+class ChunkStorage;
+}
+
 namespace voxel {
 class ChunkMesher;
 class ChunkRegistry;
@@ -28,8 +32,10 @@ public:
                ThreadSafeQueue<voxel::GenerateJob>& generateQueue,
                ThreadSafeQueue<voxel::MeshJob>& meshQueue,
                ThreadSafeQueue<voxel::MeshReady>& readyQueue,
+               ThreadSafeQueue<voxel::SaveJob>& saveQueue,
                voxel::ChunkRegistry& registry,
                const voxel::ChunkMesher& mesher,
+               persistence::ChunkStorage* storage,
                core::Profiler* profiler);
     void Stop();
     void NotifyWork();
@@ -40,6 +46,7 @@ private:
     void WorkerLoop();
     void ExecuteGenerate(const voxel::GenerateJob& job);
     void ExecuteMesh(const voxel::MeshJob& job);
+    void ExecuteSave(const voxel::SaveJob& job);
 
     std::atomic<bool> stop_{false};
     std::vector<std::thread> threads_;
@@ -47,8 +54,10 @@ private:
     ThreadSafeQueue<voxel::GenerateJob>* generateQueue_ = nullptr;
     ThreadSafeQueue<voxel::MeshJob>* meshQueue_ = nullptr;
     ThreadSafeQueue<voxel::MeshReady>* readyQueue_ = nullptr;
+    ThreadSafeQueue<voxel::SaveJob>* saveQueue_ = nullptr;
     voxel::ChunkRegistry* registry_ = nullptr;
     const voxel::ChunkMesher* mesher_ = nullptr;
+    persistence::ChunkStorage* storage_ = nullptr;
     core::Profiler* profiler_ = nullptr;
 
     std::mutex wakeMutex_;

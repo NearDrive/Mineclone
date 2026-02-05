@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <queue>
+#include <deque>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -57,9 +58,18 @@ struct ChunkStreamingStats {
     std::size_t regionDeferredThisFrame = 0;
 };
 
+struct RegionChunkSpan {
+    std::size_t vertexStart = 0;
+    std::size_t vertexCount = 0;
+    std::size_t indexStart = 0;
+    std::size_t indexCount = 0;
+};
+
 struct RegionMeshEntry {
     ChunkMesh mesh;
     std::unordered_set<ChunkCoord, ChunkCoordHash> chunks;
+    std::unordered_map<ChunkCoord, RegionChunkSpan, ChunkCoordHash> chunkSpans;
+    std::unordered_set<ChunkCoord, ChunkCoordHash> dirtyChunks;
     bool dirty = false;
 };
 
@@ -83,6 +93,7 @@ public:
     core::ThreadSafeQueue<GenerateJob>& GenerateQueue();
     core::ThreadSafeQueue<MeshJob>& MeshQueue();
     core::ThreadSafeQueue<MeshReady>& UploadQueue();
+    core::ThreadSafeQueue<SaveJob>& SaveQueue();
 
     const ChunkStreamingConfig& Config() const;
     const ChunkStreamingStats& Stats() const;
@@ -110,7 +121,9 @@ private:
 
     void ProcessUploads(ChunkRegistry& registry);
     void MarkRegionDirtyForChunk(const ChunkCoord& coord);
-    void BuildDirtyRegionList();
+    void QueueDirtyRegion(const RegionCoord& coord);
+    void EraseChunkFromRegionMesh(RegionMeshEntry& region, const ChunkCoord& coord);
+    void AppendChunkToRegionMesh(RegionMeshEntry& region, const ChunkCoord& coord, const ChunkMeshCpu& cpuMesh);
     void ProcessRegionUploads(ChunkRegistry& registry);
     void BuildDesiredSet(const ChunkCoord& playerChunk);
     void UnloadOutOfRange(ChunkRegistry& registry);
@@ -126,7 +139,8 @@ private:
     std::vector<ChunkCoord> desiredCoords_;
     std::unordered_set<ChunkCoord, ChunkCoordHash> desiredSet_;
     std::vector<ChunkCoord> unloadList_;
-    std::vector<RegionCoord> dirtyRegions_;
+    std::deque<RegionCoord> dirtyRegions_;
+    std::unordered_set<RegionCoord, RegionCoordHash> dirtyRegionSet_;
     std::priority_queue<DeferredUpload, std::vector<DeferredUpload>, DeferredUploadCompare> deferredUploads_;
     std::uint64_t deferredUploadSequence_ = 0;
     std::unordered_map<RegionCoord, RegionMeshEntry, RegionCoordHash> regions_;
@@ -134,6 +148,7 @@ private:
     core::ThreadSafeQueue<GenerateJob> generateQueue_;
     core::ThreadSafeQueue<MeshJob> meshQueue_;
     core::ThreadSafeQueue<MeshReady> uploadQueue_;
+    core::ThreadSafeQueue<SaveJob> saveQueue_;
 
     core::Profiler* profiler_ = nullptr;
     persistence::ChunkStorage* storage_ = nullptr;

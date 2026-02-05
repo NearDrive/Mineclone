@@ -740,8 +740,10 @@ int main(int argc, char** argv) {
                              streaming.GenerateQueue(),
                              streaming.MeshQueue(),
                              streaming.UploadQueue(),
+                             streaming.SaveQueue(),
                              chunkRegistry,
                              mesher,
+                             &chunkStorage,
                              &profiler);
         }
         streaming.SetWorkerThreads(workerPool.ThreadCount());
