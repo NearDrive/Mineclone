@@ -151,6 +151,7 @@ typedef void (APIENTRY *PFNGLBUFFERDATAPROC)(GLenum target, GLsizeiptr size, con
 typedef void (APIENTRY *PFNGLENABLEVERTEXATTRIBARRAYPROC)(GLuint index);
 typedef void (APIENTRY *PFNGLVERTEXATTRIBPOINTERPROC)(GLuint index, GLint size, GLenum type, GLboolean normalized, GLsizei stride, const void *pointer);
 typedef GLint (APIENTRY *PFNGLGETUNIFORMLOCATIONPROC)(GLuint program, const GLchar *name);
+typedef void (APIENTRY *PFNGLUNIFORM1FPROC)(GLint location, GLfloat v0);
 typedef void (APIENTRY *PFNGLUNIFORM1IPROC)(GLint location, GLint v0);
 typedef void (APIENTRY *PFNGLUNIFORM3FVPROC)(GLint location, GLsizei count, const GLfloat *value);
 typedef void (APIENTRY *PFNGLUNIFORMMATRIX4FVPROC)(GLint location, GLsizei count, GLboolean transpose, const GLfloat *value);
@@ -216,6 +217,7 @@ GLAPI PFNGLBUFFERDATAPROC glad_glBufferData;
 GLAPI PFNGLENABLEVERTEXATTRIBARRAYPROC glad_glEnableVertexAttribArray;
 GLAPI PFNGLVERTEXATTRIBPOINTERPROC glad_glVertexAttribPointer;
 GLAPI PFNGLGETUNIFORMLOCATIONPROC glad_glGetUniformLocation;
+GLAPI PFNGLUNIFORM1FPROC glad_glUniform1f;
 GLAPI PFNGLUNIFORM1IPROC glad_glUniform1i;
 GLAPI PFNGLUNIFORM3FVPROC glad_glUniform3fv;
 GLAPI PFNGLUNIFORMMATRIX4FVPROC glad_glUniformMatrix4fv;
@@ -277,6 +279,8 @@ GLAPI PFNGLDEBUGMESSAGECONTROLPROC glad_glDebugMessageControl;
 #define glEnableVertexAttribArray glad_glEnableVertexAttribArray
 #define glVertexAttribPointer glad_glVertexAttribPointer
 #define glGetUniformLocation glad_glGetUniformLocation
+#define glUniform1f glad_glUniform1f
+#define glUniform1i glad_glUniform1i
 #define glUniform3fv glad_glUniform3fv
 #define glUniformMatrix4fv glad_glUniformMatrix4fv
 #define glDrawElements glad_glDrawElements
