@@ -66,6 +66,8 @@ constexpr int kRenderRadiusMax = 32;
 constexpr int kLoadRadiusDefault = 10;
 constexpr int kLoadRadiusMin = kRenderRadiusMin;
 constexpr int kLoadRadiusMax = 48;
+constexpr float kGameplayReadyRatioThreshold = 0.85f;
+constexpr std::size_t kGameplayUploadQueueThreshold = 48;
 constexpr float kReachDistance = 6.0f;
 constexpr float kHighlightEpsilon = 0.015f;
 constexpr glm::vec3 kFogColorBase(0.08f, 0.10f, 0.15f);
@@ -798,8 +800,11 @@ int main(int argc, char** argv) {
         int lastRegionUploads = 0;
         std::size_t lastRegionUploadIndices = 0;
         std::size_t lastRegionDeferred = 0;
+        float lastLoadingPercent = 0.0f;
+        std::size_t lastLoadingQueue = 0;
         voxel::RaycastHit currentHit;
         bool hasTarget = false;
+        bool gameplayUnlocked = !allowInput;
         bool spacePressed = false;
 #ifndef NDEBUG
         bool resetPressed = false;
@@ -1049,7 +1054,7 @@ int main(int argc, char** argv) {
                     fogHeightIncreasePressed = false;
                 }
 
-                if (app::gMouseCaptured) {
+                if (app::gMouseCaptured && gameplayUnlocked) {
                     float yawRadians = glm::radians(app::gCamera.getYaw());
                     glm::vec3 forward(std::cos(yawRadians), 0.0f, std::sin(yawRadians));
                     glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0.0f, 1.0f, 0.0f)));
@@ -1075,7 +1080,7 @@ int main(int argc, char** argv) {
                 int spaceState = glfwGetKey(window, GLFW_KEY_SPACE);
                 if (spaceState == GLFW_PRESS && !spacePressed) {
                     spacePressed = true;
-                    if (app::gMouseCaptured) {
+                    if (app::gMouseCaptured && gameplayUnlocked) {
                         jumpPressed = true;
                     }
                 } else if (spaceState == GLFW_RELEASE) {
@@ -1107,7 +1112,11 @@ int main(int argc, char** argv) {
                     SetCameraAngles(app::gCamera, yawPitch.x, yawPitch.y);
                 }
             } else {
-                player.Update(chunkRegistry, desiredDir, jumpPressed, deltaTime);
+                if (!allowInput || gameplayUnlocked) {
+                    player.Update(chunkRegistry, desiredDir, jumpPressed, deltaTime);
+                } else {
+                    player.ResetVelocity();
+                }
                 app::gCamera.setPosition(player.Position() + kEyeOffset);
             }
 
@@ -1201,7 +1210,7 @@ int main(int argc, char** argv) {
                     leftClickPressed = true;
                     if (!app::gMouseCaptured) {
                         app::SetMouseCapture(window, true);
-                    } else if (hasTarget) {
+                    } else if (gameplayUnlocked && hasTarget) {
                         voxel::WorldBlockCoord target{currentHit.block.x, currentHit.block.y, currentHit.block.z};
                         voxel::TrySetBlock(chunkRegistry, streaming, target, voxel::kBlockAir);
                     }
@@ -1212,7 +1221,7 @@ int main(int argc, char** argv) {
                 int rightState = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);
                 if (rightState == GLFW_PRESS && !rightClickPressed) {
                     rightClickPressed = true;
-                    if (app::gMouseCaptured && hasTarget && currentHit.normal != glm::ivec3(0)) {
+                    if (gameplayUnlocked && app::gMouseCaptured && hasTarget && currentHit.normal != glm::ivec3(0)) {
                         glm::ivec3 placeBlock = currentHit.block + currentHit.normal;
                         voxel::WorldBlockCoord target{placeBlock.x, placeBlock.y, placeBlock.z};
                         if (chunkRegistry.GetBlockOrAir(target) == voxel::kBlockAir) {
@@ -1577,11 +1586,32 @@ int main(int argc, char** argv) {
         lastRegionUploads = streamStats.regionsUploadedThisFrame;
         lastRegionUploadIndices = streamStats.regionUploadedIndicesThisFrame;
         lastRegionDeferred = streamStats.regionDeferredThisFrame;
+        lastLoadingQueue = streamStats.uploadQueue;
         lastDrawnChunks = drawn;
         lastFrustumCulled = frustumCulled;
         lastDistanceCulled = distanceCulled;
         lastDrawCalls = drawn;
         lastWorkerThreads = streamStats.workerThreads;
+
+        {
+            const voxel::ChunkStreamingConfig& cfg = streaming.Config();
+            const std::size_t layerCount = static_cast<std::size_t>(cfg.verticalRadius * 2 + 1);
+            const std::size_t desiredChunks = static_cast<std::size_t>((cfg.loadRadius * 2 + 1) * (cfg.loadRadius * 2 + 1))
+                                              * layerCount;
+            const float loadRatio = desiredChunks > 0
+                                        ? static_cast<float>(streamStats.gpuReadyChunks) /
+                                              static_cast<float>(desiredChunks)
+                                        : 1.0f;
+            lastLoadingPercent = std::clamp(loadRatio * 100.0f, 0.0f, 100.0f);
+            if (allowInput && !gameplayUnlocked &&
+                loadRatio >= kGameplayReadyRatioThreshold &&
+                streamStats.uploadQueue <= kGameplayUploadQueueThreshold) {
+                gameplayUnlocked = true;
+                std::cout << "[Streaming] Gameplay unlocked at "
+                          << std::fixed << std::setprecision(1) << lastLoadingPercent
+                          << "% ready, upload queue " << streamStats.uploadQueue << ".\n";
+            }
+        }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -1664,6 +1694,10 @@ int main(int argc, char** argv) {
                       << " | RUp: " << lastRegionUploads << "/" << lastRegionDeferred
                       << " (idx " << lastRegionUploadIndices << ")"
                       << " | Drawn: " << lastDrawnChunks;
+                if (allowInput && !gameplayUnlocked) {
+                    title << " | Loading: " << std::setprecision(1) << lastLoadingPercent
+                          << "% (UQ " << lastLoadingQueue << ")";
+                }
             }
 
             if (!statsTitleEnabled) {

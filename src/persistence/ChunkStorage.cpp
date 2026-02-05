@@ -12,6 +12,14 @@ namespace persistence {
 
 namespace {
 
+bool IsChunkIoVerboseLoggingEnabled() {
+#ifndef NDEBUG
+    return true;
+#else
+    return false;
+#endif
+}
+
 std::string CoordToString(const voxel::ChunkCoord& coord) {
     std::ostringstream stream;
     stream << "(" << coord.x << "," << coord.y << "," << coord.z << ")";
@@ -140,8 +148,10 @@ bool ChunkStorage::LoadChunk(const voxel::ChunkCoord& coord, voxel::Chunk& chunk
         return false;
     }
 
-    std::cout << "[Storage] Loaded chunk " << CoordToString(coord)
-              << " (" << header.payloadBytes << " bytes).\n";
+    if (IsChunkIoVerboseLoggingEnabled()) {
+        std::cout << "[Storage] Loaded chunk " << CoordToString(coord)
+                  << " (" << header.payloadBytes << " bytes).\n";
+    }
     return true;
 }
 
@@ -204,10 +214,12 @@ bool ChunkStorage::SaveChunk(const voxel::ChunkCoord& coord, const voxel::Chunk&
         return false;
     }
 
-    auto end = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    std::cout << "[Storage] Saved chunk " << CoordToString(coord)
-              << " (" << payloadBytes << " bytes, " << elapsed << " ms).\n";
+    if (IsChunkIoVerboseLoggingEnabled()) {
+        auto end = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        std::cout << "[Storage] Saved chunk " << CoordToString(coord)
+                  << " (" << payloadBytes << " bytes, " << elapsed << " ms).\n";
+    }
     return true;
 }
 
