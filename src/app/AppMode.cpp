@@ -52,6 +52,9 @@ constexpr float kMaxDeltaTime = 0.05f;
 constexpr float kSmokeDeltaTime = 1.0f / 60.0f;
 constexpr int kWorkerThreadsDefault = 2;
 constexpr int kSmokeMenuWorldFrames = 60;
+constexpr float kLoadingMinDisplaySeconds = 0.2f;
+constexpr float kLoadingMaxWaitSeconds = 300.0f;
+constexpr float kLoadingReadyFraction = 0.6f;
 constexpr std::string_view kWorldPrefix = "world_";
 const glm::vec3 kPlayerSpawn = []() {
     const int surfaceHeight = voxel::GetSurfaceHeight(0, 0);
@@ -254,6 +257,13 @@ std::string FormatWorldId(std::time_t timestamp) {
     return out.str();
 }
 
+std::string BuildLoadingTitle(int percent) {
+    const int clamped = std::clamp(percent, 0, 100);
+    std::ostringstream out;
+    out << "[LOADING] " << clamped << "%";
+    return out.str();
+}
+
 bool WorldHasChunkFiles(const std::filesystem::path& root) {
     std::error_code error;
     if (!std::filesystem::exists(root, error)) {
@@ -377,6 +387,8 @@ std::string StateLabel(GameState state) {
     switch (state) {
         case GameState::MainMenu:
             return "MainMenu";
+        case GameState::Loading:
+            return "Loading";
         case GameState::Playing:
             return "Playing";
         case GameState::PauseMenu:
@@ -470,7 +482,9 @@ void AppMode::Tick() {
         HandlePlayingInput();
     }
 
-    if (state_ == GameState::Playing) {
+    if (state_ == GameState::Loading) {
+        TickLoading(now);
+    } else if (state_ == GameState::Playing) {
         if (world_) {
             TickWorld(deltaTime, now, options_.allowInput, true, true);
         }
@@ -601,6 +615,8 @@ void AppMode::UpdateMenuTitle(bool force) {
         glfwSetWindowTitle(window_, std::string(title).c_str());
     } else if (state_ == GameState::PauseMenu) {
         glfwSetWindowTitle(window_, std::string(MenuModel::kPauseMenuTitle).c_str());
+    } else if (state_ == GameState::Loading) {
+        glfwSetWindowTitle(window_, std::string(MenuModel::kLoadingTitle).c_str());
     }
 
     lastTitleUpdate_ = now;
@@ -623,7 +639,8 @@ void AppMode::StartNewWorld(const std::string& worldId) {
 
     gCamera.setPosition(kPlayerSpawn + kEyeOffset);
     loadMissing_ = false;
-    SetState(GameState::Playing);
+    loadingStartedAt_ = std::chrono::steady_clock::now();
+    SetState(GameState::Loading);
 }
 
 void AppMode::StartLoadedWorld() {
@@ -725,6 +742,131 @@ std::optional<std::string> AppMode::FindLatestWorldId() const {
     }
 
     return latestId;
+}
+
+float AppMode::ComputeLoadingProgress() const {
+    if (!world_) {
+        return 0.0f;
+    }
+
+    const voxel::ChunkStreamingStats& stats = world_->streaming.Stats();
+    const voxel::ChunkCoord center = stats.playerChunk;
+    const int renderRadius = world_->streaming.RenderRadius();
+    const int verticalRadius = std::max(0, world_->streaming.Config().verticalRadius);
+    const int totalColumns = (2 * renderRadius + 1) * (2 * renderRadius + 1);
+    const int totalChunks = totalColumns * (2 * verticalRadius + 1);
+    const std::size_t targetReadyChunks = static_cast<std::size_t>(std::max(1, totalChunks));
+
+    std::size_t readyChunks = 0;
+    world_->chunkRegistry.ForEachEntry([&](const voxel::ChunkCoord& coord, const std::shared_ptr<voxel::ChunkEntry>& entry) {
+        const int dx = std::abs(coord.x - center.x);
+        const int dz = std::abs(coord.z - center.z);
+        const int dy = std::abs(coord.y - center.y);
+        if (dx > renderRadius || dz > renderRadius || dy > verticalRadius) {
+            return;
+        }
+        if (entry->gpuState.load(std::memory_order_acquire) == voxel::GpuState::Uploaded) {
+            ++readyChunks;
+        }
+    });
+
+    readyChunks = std::min(readyChunks, targetReadyChunks);
+    return static_cast<float>(readyChunks) / static_cast<float>(targetReadyChunks);
+}
+
+bool AppMode::IsWorldReadyToPlay() const {
+    const float progress = ComputeLoadingProgress();
+    return progress >= kLoadingReadyFraction;
+}
+
+void AppMode::TickLoading(const std::chrono::steady_clock::time_point& now) {
+    if (!world_) {
+        SetState(GameState::MainMenu);
+        return;
+    }
+
+    glm::vec3 playerPosition = world_->player.Position();
+    voxel::WorldBlockCoord playerBlock{
+        static_cast<int>(std::floor(playerPosition.x)),
+        static_cast<int>(std::floor(playerPosition.y)),
+        static_cast<int>(std::floor(playerPosition.z))};
+    voxel::ChunkCoord playerChunk = voxel::WorldToChunkCoord(playerBlock, voxel::kChunkSize);
+    world_->streaming.Tick(playerChunk, world_->chunkRegistry, world_->mesher);
+    world_->workerPool.NotifyWork();
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    const float progress = ComputeLoadingProgress();
+    const int percent = static_cast<int>(std::round(progress * 100.0f));
+    const std::string loadingTitle = BuildLoadingTitle(percent);
+    glfwSetWindowTitle(window_, loadingTitle.c_str());
+
+    const float left = -0.66f;
+    const float right = 0.66f;
+    const float top = -0.80f;
+    const float bottom = -0.92f;
+    const float borderInset = 0.012f;
+    const float innerLeft = left + borderInset;
+    const float innerRight = right - borderInset;
+    const float innerTop = top - borderInset;
+    const float innerBottom = bottom + borderInset;
+    const float fillRight = innerLeft + std::max(0.0f, innerRight - innerLeft) * std::clamp(progress, 0.0f, 1.0f);
+
+    std::vector<glm::vec3> barVertices = {
+        {left, top, 0.0f}, {right, top, 0.0f},
+        {right, top, 0.0f}, {right, bottom, 0.0f},
+        {right, bottom, 0.0f}, {left, bottom, 0.0f},
+        {left, bottom, 0.0f}, {left, top, 0.0f},
+
+        {innerLeft, innerTop, 0.0f}, {innerRight, innerTop, 0.0f},
+        {innerRight, innerTop, 0.0f}, {innerRight, innerBottom, 0.0f},
+        {innerRight, innerBottom, 0.0f}, {innerLeft, innerBottom, 0.0f},
+        {innerLeft, innerBottom, 0.0f}, {innerLeft, innerTop, 0.0f},
+    };
+
+    if (fillRight > innerLeft) {
+        const float stripeSpan = 0.10f;
+        const float stripeSpacing = 0.14f;
+        const std::chrono::duration<float> elapsed = now - loadingStartedAt_;
+        const float animPhase = std::fmod(elapsed.count() * 0.35f, stripeSpacing);
+
+        for (float x = innerLeft - stripeSpan + animPhase; x < fillRight; x += stripeSpacing) {
+            const float x0 = std::max(innerLeft, x);
+            const float x1 = std::min(fillRight, x + stripeSpan);
+            barVertices.push_back({x0, innerBottom, 0.0f});
+            barVertices.push_back({x1, innerTop, 0.0f});
+        }
+    }
+
+    loadingBarDraw_.UpdateLineList(barVertices);
+    if (loadingBarDraw_.HasGeometry()) {
+        glDisable(GL_DEPTH_TEST);
+        debugShader_.use();
+        debugShader_.setMat4("uProjection", glm::mat4(1.0f));
+        debugShader_.setMat4("uView", glm::mat4(1.0f));
+        const glm::vec3 startColor(0.58f, 0.36f, 0.98f);
+        const glm::vec3 endColor(0.20f, 0.92f, 0.96f);
+        const glm::vec3 barColor = glm::mix(startColor, endColor, std::clamp(progress, 0.0f, 1.0f));
+        debugShader_.setVec3("uColor", barColor);
+        glLineWidth(2.0f);
+        loadingBarDraw_.Draw();
+        glLineWidth(1.0f);
+        glEnable(GL_DEPTH_TEST);
+    }
+
+    const bool ready = IsWorldReadyToPlay();
+    const std::chrono::duration<float> loadingElapsed = now - loadingStartedAt_;
+    const bool minDisplayDone = loadingElapsed.count() >= kLoadingMinDisplaySeconds;
+    const bool timeoutReached = loadingElapsed.count() >= kLoadingMaxWaitSeconds;
+
+    if ((ready && minDisplayDone) || timeoutReached) {
+        if (timeoutReached && !ready) {
+            std::cout << "[Loading] Timeout reached, entering world while streaming continues.\n";
+        }
+        loadingBarDraw_.Clear();
+        SetState(GameState::Playing);
+    }
 }
 
 void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_point& now,
