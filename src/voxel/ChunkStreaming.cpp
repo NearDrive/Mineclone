@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -298,19 +299,6 @@ core::ThreadSafeQueue<MeshReady>& ChunkStreaming::UploadQueue() {
 
 void ChunkStreaming::ProcessUploads(ChunkRegistry& registry) {
     core::ScopedTimer uploadTimer(profiler_, core::Metric::Upload);
-    std::vector<MeshReady> pending;
-    pending.reserve(deferredUploads_.size() + uploadQueue_.size());
-
-    for (auto& deferred : deferredUploads_) {
-        pending.push_back(std::move(deferred));
-    }
-    deferredUploads_.clear();
-
-    MeshReady popped;
-    while (uploadQueue_.try_pop(popped)) {
-        pending.push_back(std::move(popped));
-    }
-
     const auto distanceSq = [&](const ChunkCoord& coord) {
         const int dx = coord.x - stats_.playerChunk.x;
         const int dy = coord.y - stats_.playerChunk.y;
@@ -318,27 +306,35 @@ void ChunkStreaming::ProcessUploads(ChunkRegistry& registry) {
         return dx * dx + dy * dy + dz * dz;
     };
 
-    std::sort(pending.begin(), pending.end(), [&](const MeshReady& a, const MeshReady& b) {
-        const int aDist2 = distanceSq(a.coord);
-        const int bDist2 = distanceSq(b.coord);
-        if (aDist2 != bDist2) {
-            return aDist2 < bDist2;
-        }
-        if (a.coord.y != b.coord.y) {
-            return a.coord.y < b.coord.y;
-        }
-        if (a.coord.z != b.coord.z) {
-            return a.coord.z < b.coord.z;
-        }
-        return a.coord.x < b.coord.x;
-    });
+    const auto encodeUploadPriority = [&](const MeshReady& ready) {
+        const std::size_t meshBytes = ready.cpuMesh ? ready.cpuMesh->ByteSize() : 0;
+        const std::uint64_t dist2 = static_cast<std::uint64_t>(distanceSq(ready.coord));
+        const std::uint64_t cappedBytes =
+            std::min<std::uint64_t>(meshBytes, static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()));
+        return (dist2 << 32) | cappedBytes;
+    };
+
+    const auto enqueueDeferred = [&](MeshReady&& ready) {
+        const std::uint64_t priority = encodeUploadPriority(ready);
+        deferredUploads_.push(DeferredUpload{
+            std::move(ready),
+            priority,
+            deferredUploadSequence_++,
+        });
+    };
+
+    MeshReady popped;
+    int remainingSortBudget = std::max(0, config_.maxGpuUploadsPerFrame);
+    while (remainingSortBudget > 0 && uploadQueue_.try_pop(popped)) {
+        enqueueDeferred(std::move(popped));
+        --remainingSortBudget;
+    }
 
     std::size_t uploadedBytes = 0;
-    for (auto& ready : pending) {
-        if (stats_.uploadedThisFrame >= config_.maxGpuUploadsPerFrame) {
-            deferredUploads_.push_back(std::move(ready));
-            continue;
-        }
+    while (stats_.uploadedThisFrame < config_.maxGpuUploadsPerFrame && !deferredUploads_.empty()) {
+        DeferredUpload deferred = deferredUploads_.top();
+        deferredUploads_.pop();
+        MeshReady& ready = deferred.ready;
 
         if (!ready.cpuMesh) {
             continue;
@@ -371,7 +367,7 @@ void ChunkStreaming::ProcessUploads(ChunkRegistry& registry) {
         const std::size_t meshBytes = ready.cpuMesh->ByteSize();
         const bool hasBudget = uploadedBytes + meshBytes <= config_.maxGpuUploadBytesPerFrame;
         if (!hasBudget && stats_.uploadedThisFrame > 0) {
-            deferredUploads_.push_back(std::move(ready));
+            enqueueDeferred(std::move(ready));
             continue;
         }
 
