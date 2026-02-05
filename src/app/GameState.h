@@ -4,6 +4,7 @@ namespace app {
 
 enum class GameState {
     MainMenu,
+    Loading,
     Playing,
     PauseMenu,
     Exiting
