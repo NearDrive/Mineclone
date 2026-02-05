@@ -1229,9 +1229,6 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
     shader_.setMat4("uView", world_->view);
     shader_.setVec3("uLightDir", world_->lightDir);
     shader_.setVec3("uCameraPos", gCamera.getPosition());
-    shader_.setVec3("uFogColor", glm::vec3(0.08f, 0.10f, 0.15f));
-    const float fogEnd = static_cast<float>(world_->streaming.RenderRadius() * voxel::kChunkSize);
-    shader_.setVec3("uFogParams", glm::vec3(fogEnd * 0.6f, fogEnd, 0.0f));
     shader_.setInt("uTexture", 0);
     glad_glActiveTexture(GL_TEXTURE0);
     glad_glBindTexture(GL_TEXTURE_2D, blockTexture_);
