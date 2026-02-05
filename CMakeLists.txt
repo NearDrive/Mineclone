@@ -103,6 +103,7 @@ add_executable(Mineclone
   src/voxel/ChunkStreaming.h
   src/voxel/Raycast.cpp
   src/voxel/Raycast.h
+  src/voxel/RegionCoord.h
   src/voxel/VoxelCoords.h
   src/voxel/WorldGen.cpp
   src/voxel/WorldGen.h

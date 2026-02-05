@@ -13,23 +13,36 @@ namespace {
 void RequestNeighborRemesh(const ChunkCoord& base, const LocalCoord& local,
                            ChunkStreaming& streaming, ChunkRegistry& registry) {
     streaming.RequestRemesh(base, registry);
+    streaming.MarkRegionDirty(base);
 
     if (local.x == 0) {
-        streaming.RequestRemesh({base.x - 1, base.y, base.z}, registry);
+        const ChunkCoord neighbor{base.x - 1, base.y, base.z};
+        streaming.RequestRemesh(neighbor, registry);
+        streaming.MarkRegionDirty(neighbor);
     } else if (local.x == kChunkSize - 1) {
-        streaming.RequestRemesh({base.x + 1, base.y, base.z}, registry);
+        const ChunkCoord neighbor{base.x + 1, base.y, base.z};
+        streaming.RequestRemesh(neighbor, registry);
+        streaming.MarkRegionDirty(neighbor);
     }
 
     if (local.y == 0) {
-        streaming.RequestRemesh({base.x, base.y - 1, base.z}, registry);
+        const ChunkCoord neighbor{base.x, base.y - 1, base.z};
+        streaming.RequestRemesh(neighbor, registry);
+        streaming.MarkRegionDirty(neighbor);
     } else if (local.y == kChunkSize - 1) {
-        streaming.RequestRemesh({base.x, base.y + 1, base.z}, registry);
+        const ChunkCoord neighbor{base.x, base.y + 1, base.z};
+        streaming.RequestRemesh(neighbor, registry);
+        streaming.MarkRegionDirty(neighbor);
     }
 
     if (local.z == 0) {
-        streaming.RequestRemesh({base.x, base.y, base.z - 1}, registry);
+        const ChunkCoord neighbor{base.x, base.y, base.z - 1};
+        streaming.RequestRemesh(neighbor, registry);
+        streaming.MarkRegionDirty(neighbor);
     } else if (local.z == kChunkSize - 1) {
-        streaming.RequestRemesh({base.x, base.y, base.z + 1}, registry);
+        const ChunkCoord neighbor{base.x, base.y, base.z + 1};
+        streaming.RequestRemesh(neighbor, registry);
+        streaming.MarkRegionDirty(neighbor);
     }
 }
 }

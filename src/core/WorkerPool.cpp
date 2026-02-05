@@ -157,6 +157,7 @@ void WorkerPool::ExecuteMesh(const voxel::MeshJob& job) {
     auto meshPayload = std::make_shared<voxel::ChunkMeshCpu>(std::move(cpuMesh));
     readyQueue_->push(voxel::MeshReady{job.coord, job.entry, std::move(meshPayload)});
     entry->meshingState.store(voxel::MeshingState::Ready, std::memory_order_release);
+    entry->cpuMeshReady.store(false, std::memory_order_release);
     entry->gpuState.store(voxel::GpuState::UploadQueued, std::memory_order_release);
 }
 

@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <unordered_set>
 
 #include "persistence/ChunkStorage.h"
 #include "voxel/Chunk.h"
@@ -70,9 +71,51 @@ void ChunkStreaming::Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry
     UnloadOutOfRange(registry);
     EnqueueMissing(registry);
     ProcessUploads(registry);
+    ProcessRegionUploads(registry);
     UpdateStats(registry);
     WarnIfQueuesLarge();
     (void)mesher;
+}
+
+std::vector<RegionCoord> ChunkStreaming::CollectDrawableRegions(const ChunkCoord& playerChunk) const {
+    std::vector<RegionCoord> drawable;
+    drawable.reserve(regions_.size());
+    std::unordered_set<RegionCoord, RegionCoordHash> emitted;
+
+    for (const auto& [coord, region] : regions_) {
+        if (region.mesh.GpuIndexCount() == 0) {
+            continue;
+        }
+
+        const int minChunkX = coord.x * kRegionSizeChunksX;
+        const int minChunkZ = coord.z * kRegionSizeChunksZ;
+        const int maxChunkX = minChunkX + (kRegionSizeChunksX - 1);
+        const int maxChunkZ = minChunkZ + (kRegionSizeChunksZ - 1);
+
+        const int dx = std::max({playerChunk.x - maxChunkX, 0, minChunkX - playerChunk.x});
+        const int dz = std::max({playerChunk.z - maxChunkZ, 0, minChunkZ - playerChunk.z});
+        if (std::max(dx, dz) > config_.renderRadius) {
+            continue;
+        }
+
+        if (emitted.insert(coord).second) {
+            drawable.push_back(coord);
+        }
+    }
+
+    return drawable;
+}
+
+bool ChunkStreaming::DrawRegion(const RegionCoord& region) const {
+    auto it = regions_.find(region);
+    if (it == regions_.end()) {
+        return false;
+    }
+    if (it->second.mesh.GpuIndexCount() == 0) {
+        return false;
+    }
+    it->second.mesh.Draw();
+    return true;
 }
 
 void ChunkStreaming::SetProfiler(core::Profiler* profiler) {
@@ -100,12 +143,17 @@ bool ChunkStreaming::RequestRemesh(const ChunkCoord& coord, ChunkRegistry& regis
     MeshingState state = entry->meshingState.load(std::memory_order_acquire);
     while (state == MeshingState::NotScheduled || state == MeshingState::Ready) {
         if (entry->meshingState.compare_exchange_weak(state, MeshingState::Queued)) {
+            entry->cpuMeshReady.store(false, std::memory_order_release);
             meshQueue_.push(MeshJob{coord, entry});
             return true;
         }
     }
 
     return false;
+}
+
+void ChunkStreaming::MarkRegionDirty(const ChunkCoord& coord) {
+    MarkRegionDirtyForChunk(coord);
 }
 
 void ChunkStreaming::BuildDesiredSet(const ChunkCoord& playerChunk) {
@@ -148,6 +196,7 @@ void ChunkStreaming::UnloadOutOfRange(ChunkRegistry& registry) {
     });
 
     for (const ChunkCoord& coord : unloadList_) {
+        MarkRegionDirtyForChunk(coord);
         if (storage_) {
             registry.SaveChunkIfDirty(coord, *storage_);
         }
@@ -191,6 +240,7 @@ void ChunkStreaming::EnqueueMissing(ChunkRegistry& registry) {
             entry->generationState.load(std::memory_order_acquire) == GenerationState::Ready) {
             MeshingState meshExpected = MeshingState::NotScheduled;
             if (entry->meshingState.compare_exchange_strong(meshExpected, MeshingState::Queued)) {
+                entry->cpuMeshReady.store(false, std::memory_order_release);
                 meshQueue_.push(MeshJob{coord, entry});
                 ++stats_.meshedThisFrame;
                 --meshBudget;
@@ -268,13 +318,81 @@ void ChunkStreaming::ProcessUploads(ChunkRegistry& registry) {
             continue;
         }
 
-        entry->mesh.Clear();
-        entry->mesh.Vertices() = std::move(ready.cpuMesh->vertices);
-        entry->mesh.Indices() = std::move(ready.cpuMesh->indices);
-        entry->mesh.UploadToGpu();
-        entry->mesh.ClearCpu();
+        entry->cpuMesh = std::move(*ready.cpuMesh);
+        entry->cpuMeshReady.store(true, std::memory_order_release);
         entry->gpuState.store(GpuState::Uploaded, std::memory_order_release);
+        MarkRegionDirtyForChunk(ready.coord);
         ++stats_.uploadedThisFrame;
+    }
+}
+
+void ChunkStreaming::MarkRegionDirtyForChunk(const ChunkCoord& coord) {
+    RegionCoord regionCoord = ChunkToRegionCoord(coord);
+    RegionMeshEntry& region = regions_[regionCoord];
+    region.dirty = true;
+}
+
+void ChunkStreaming::BuildDirtyRegionList() {
+    dirtyRegions_.clear();
+    for (const auto& [coord, region] : regions_) {
+        if (region.dirty) {
+            dirtyRegions_.push_back(coord);
+        }
+    }
+}
+
+void ChunkStreaming::ProcessRegionUploads(ChunkRegistry& registry) {
+    BuildDirtyRegionList();
+    for (const RegionCoord& coord : dirtyRegions_) {
+        auto regionIt = regions_.find(coord);
+        if (regionIt == regions_.end()) {
+            continue;
+        }
+        RegionMeshEntry& region = regionIt->second;
+
+        std::vector<ChunkCoord> chunksToKeep;
+        chunksToKeep.reserve(region.chunks.size() + 8);
+
+        for (const ChunkCoord& chunkCoord : desiredCoords_) {
+            if (ChunkToRegionCoord(chunkCoord) == coord) {
+                chunksToKeep.push_back(chunkCoord);
+            }
+        }
+
+        region.chunks.clear();
+        ChunkMeshCpu merged;
+        for (const ChunkCoord& chunkCoord : chunksToKeep) {
+            auto entry = registry.TryGetEntry(chunkCoord);
+            if (!entry) {
+                continue;
+            }
+            if (!entry->cpuMeshReady.load(std::memory_order_acquire)) {
+                continue;
+            }
+            if (entry->meshingState.load(std::memory_order_acquire) != MeshingState::Ready) {
+                continue;
+            }
+
+            const std::uint32_t baseVertex = static_cast<std::uint32_t>(merged.vertices.size());
+            merged.vertices.insert(merged.vertices.end(), entry->cpuMesh.vertices.begin(), entry->cpuMesh.vertices.end());
+            for (std::uint32_t index : entry->cpuMesh.indices) {
+                merged.indices.push_back(baseVertex + index);
+            }
+            region.chunks.insert(chunkCoord);
+        }
+
+        region.mesh.Clear();
+        if (!merged.indices.empty()) {
+            region.mesh.Vertices() = std::move(merged.vertices);
+            region.mesh.Indices() = std::move(merged.indices);
+            region.mesh.UploadToGpu();
+            region.mesh.ClearCpu();
+        }
+
+        region.dirty = false;
+        if (region.chunks.empty()) {
+            region.mesh.DestroyGpu();
+        }
     }
 }
 
@@ -283,6 +401,7 @@ void ChunkStreaming::UpdateStats(const ChunkRegistry& registry) {
     stats_.generatedChunksReady = 0;
     stats_.meshedCpuReady = 0;
     stats_.gpuReadyChunks = 0;
+    stats_.gpuReadyRegions = 0;
 
     registry.ForEachEntry([&](const ChunkCoord& coord, const std::shared_ptr<ChunkEntry>& entry) {
         (void)coord;
@@ -297,6 +416,13 @@ void ChunkStreaming::UpdateStats(const ChunkRegistry& registry) {
             ++stats_.gpuReadyChunks;
         }
     });
+
+    for (const auto& [coord, region] : regions_) {
+        (void)coord;
+        if (region.mesh.GpuIndexCount() > 0) {
+            ++stats_.gpuReadyRegions;
+        }
+    }
 
     stats_.createQueue = generateQueue_.size();
     stats_.meshQueue = meshQueue_.size();

@@ -35,6 +35,8 @@ void ChunkRegistry::RemoveChunk(const ChunkCoord& coord) {
     entry->wanted.store(false);
     entry->mesh.DestroyGpu();
     entry->mesh.Clear();
+    entry->cpuMesh.Clear();
+    entry->cpuMeshReady.store(false, std::memory_order_release);
     entry->gpuState.store(GpuState::NotUploaded);
 }
 
@@ -48,6 +50,8 @@ void ChunkRegistry::DestroyAll() {
         (void)coord;
         entry->wanted.store(false);
         entry->mesh.DestroyGpu();
+        entry->cpuMesh.Clear();
+        entry->cpuMeshReady.store(false, std::memory_order_release);
     }
 }
 
