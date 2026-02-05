@@ -118,6 +118,20 @@ void DebugDraw::UpdateFace(const glm::vec3& min, const glm::vec3& max, const glm
     hasGeometry_ = true;
 }
 
+
+void DebugDraw::UpdateLineList(const std::vector<glm::vec3>& vertices) {
+    EnsureBuffers();
+
+    vertices_ = vertices;
+    if (vertices_.empty()) {
+        hasGeometry_ = false;
+        return;
+    }
+
+    UploadVertices();
+    hasGeometry_ = true;
+}
+
 void DebugDraw::UpdateCrosshair(float halfWidthNdc, float halfHeightNdc) {
     EnsureBuffers();
 

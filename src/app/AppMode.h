@@ -8,6 +8,7 @@
 #include <glad/glad.h>
 
 #include "Shader.h"
+#include "renderer/DebugDraw.h"
 #include "app/GameState.h"
 
 struct GLFWwindow;
@@ -46,6 +47,9 @@ private:
 
     void StartNewWorld(const std::string& worldId);
     void StartLoadedWorld();
+    void TickLoading(const std::chrono::steady_clock::time_point& now);
+    bool IsWorldReadyToPlay() const;
+    float ComputeLoadingProgress() const;
     void StopWorldAndReturnToMenu();
     bool SaveWorld();
     bool WorldExists(const std::string& worldId) const;
@@ -81,11 +85,13 @@ private:
     bool smokeCompleted_ = false;
     bool smokeFailed_ = false;
     bool menuHintPrinted_ = false;
+    std::chrono::steady_clock::time_point loadingStartedAt_{};
 
     struct WorldRuntime;
     std::unique_ptr<WorldRuntime> world_;
     Shader shader_;
     Shader debugShader_;
+    DebugDraw loadingBarDraw_;
     GLuint blockTexture_ = 0;
 };
 

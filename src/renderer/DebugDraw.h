@@ -16,6 +16,7 @@ public:
     void UpdateCube(const glm::vec3& min, const glm::vec3& max);
     void UpdateFace(const glm::vec3& min, const glm::vec3& max, const glm::ivec3& normal);
     void UpdateCrosshair(float halfWidthNdc, float halfHeightNdc);
+    void UpdateLineList(const std::vector<glm::vec3>& vertices);
     void Clear();
     void Draw() const;
     bool HasGeometry() const { return hasGeometry_; }
