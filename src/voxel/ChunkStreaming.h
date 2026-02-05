@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <queue>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -28,6 +30,7 @@ struct ChunkStreamingConfig {
     int maxChunkCreatesPerFrame = 3;
     int maxChunkMeshesPerFrame = 2;
     int maxGpuUploadsPerFrame = 3;
+    std::size_t maxGpuUploadBytesPerFrame = 8 * 1024 * 1024;
     int workerThreads = 2;
     bool enabled = true;
 };
@@ -46,6 +49,7 @@ struct ChunkStreamingStats {
     int createdThisFrame = 0;
     int meshedThisFrame = 0;
     int uploadedThisFrame = 0;
+    std::size_t uploadedBytesThisFrame = 0;
 };
 
 struct RegionMeshEntry {
@@ -84,6 +88,21 @@ public:
     bool DrawRegion(const RegionCoord& region) const;
 
 private:
+    struct DeferredUpload {
+        MeshReady ready;
+        std::uint64_t priority = 0;
+        std::uint64_t sequence = 0;
+    };
+
+    struct DeferredUploadCompare {
+        bool operator()(const DeferredUpload& a, const DeferredUpload& b) const {
+            if (a.priority != b.priority) {
+                return a.priority > b.priority;
+            }
+            return a.sequence > b.sequence;
+        }
+    };
+
     void ProcessUploads(ChunkRegistry& registry);
     void MarkRegionDirtyForChunk(const ChunkCoord& coord);
     void BuildDirtyRegionList();
@@ -103,6 +122,8 @@ private:
     std::unordered_set<ChunkCoord, ChunkCoordHash> desiredSet_;
     std::vector<ChunkCoord> unloadList_;
     std::vector<RegionCoord> dirtyRegions_;
+    std::priority_queue<DeferredUpload, std::vector<DeferredUpload>, DeferredUploadCompare> deferredUploads_;
+    std::uint64_t deferredUploadSequence_ = 0;
     std::unordered_map<RegionCoord, RegionMeshEntry, RegionCoordHash> regions_;
 
     core::ThreadSafeQueue<GenerateJob> generateQueue_;

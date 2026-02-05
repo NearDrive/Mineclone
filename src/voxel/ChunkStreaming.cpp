@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -60,6 +61,7 @@ void ChunkStreaming::Tick(const ChunkCoord& playerChunk, ChunkRegistry& registry
     stats_.createdThisFrame = 0;
     stats_.meshedThisFrame = 0;
     stats_.uploadedThisFrame = 0;
+    stats_.uploadedBytesThisFrame = 0;
 
     if (!config_.enabled) {
         UpdateStats(registry);
@@ -182,6 +184,28 @@ void ChunkStreaming::BuildDesiredSet(const ChunkCoord& playerChunk) {
             }
         }
     }
+
+    std::sort(desiredCoords_.begin(), desiredCoords_.end(), [&](const ChunkCoord& a, const ChunkCoord& b) {
+        const int adx = a.x - playerChunk.x;
+        const int ady = a.y - clampedPlayerY;
+        const int adz = a.z - playerChunk.z;
+        const int bdx = b.x - playerChunk.x;
+        const int bdy = b.y - clampedPlayerY;
+        const int bdz = b.z - playerChunk.z;
+
+        const int aDist2 = adx * adx + ady * ady + adz * adz;
+        const int bDist2 = bdx * bdx + bdy * bdy + bdz * bdz;
+        if (aDist2 != bDist2) {
+            return aDist2 < bDist2;
+        }
+        if (a.y != b.y) {
+            return a.y < b.y;
+        }
+        if (a.z != b.z) {
+            return a.z < b.z;
+        }
+        return a.x < b.x;
+    });
 }
 
 void ChunkStreaming::UnloadOutOfRange(ChunkRegistry& registry) {
@@ -275,40 +299,62 @@ core::ThreadSafeQueue<MeshReady>& ChunkStreaming::UploadQueue() {
 
 void ChunkStreaming::ProcessUploads(ChunkRegistry& registry) {
     core::ScopedTimer uploadTimer(profiler_, core::Metric::Upload);
-    while (stats_.uploadedThisFrame < config_.maxGpuUploadsPerFrame) {
-        MeshReady ready;
-        if (!uploadQueue_.try_pop(ready)) {
-            break;
+    const auto distanceSq = [&](const ChunkCoord& coord) {
+        const int dx = coord.x - stats_.playerChunk.x;
+        const int dy = coord.y - stats_.playerChunk.y;
+        const int dz = coord.z - stats_.playerChunk.z;
+        return dx * dx + dy * dy + dz * dz;
+    };
+
+    const auto encodeUploadPriority = [&](const MeshReady& ready) {
+        const std::size_t meshBytes = ready.cpuMesh ? ready.cpuMesh->ByteSize() : 0;
+        const std::uint64_t dist2 = static_cast<std::uint64_t>(distanceSq(ready.coord));
+        const std::uint64_t cappedBytes =
+            std::min<std::uint64_t>(meshBytes, static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max()));
+        return (dist2 << 32) | cappedBytes;
+    };
+
+    const auto enqueueDeferred = [&](MeshReady&& ready) {
+        const std::uint64_t priority = encodeUploadPriority(ready);
+        deferredUploads_.push(DeferredUpload{
+            std::move(ready),
+            priority,
+            deferredUploadSequence_++,
+        });
+    };
+
+    MeshReady popped;
+    int remainingSortBudget = std::max(0, config_.maxGpuUploadsPerFrame);
+    while (remainingSortBudget > 0 && uploadQueue_.try_pop(popped)) {
+        enqueueDeferred(std::move(popped));
+        --remainingSortBudget;
+    }
+
+    std::size_t uploadedBytes = 0;
+    while (stats_.uploadedThisFrame < config_.maxGpuUploadsPerFrame && !deferredUploads_.empty()) {
+        DeferredUpload deferred = deferredUploads_.top();
+        deferredUploads_.pop();
+        MeshReady& ready = deferred.ready;
+
+        if (!ready.cpuMesh) {
+            continue;
         }
 
         auto entry = registry.TryGetEntry(ready.coord);
         if (!entry) {
-#ifndef NDEBUG
-            std::cout << "[Streaming] Dropped mesh upload for missing chunk (" << ready.coord.x << ", "
-                      << ready.coord.y << ", " << ready.coord.z << ").\n";
-#endif
             continue;
         }
         auto queuedEntry = ready.entry.lock();
         if (queuedEntry && queuedEntry.get() != entry.get()) {
-#ifndef NDEBUG
-            std::cout << "[Streaming] Dropped mesh upload for stale chunk (" << ready.coord.x << ", "
-                      << ready.coord.y << ", " << ready.coord.z << ").\n";
-#endif
             continue;
         }
         if (!entry->wanted.load()) {
-#ifndef NDEBUG
-            std::cout << "[Streaming] Dropped mesh upload for unloaded chunk (" << ready.coord.x << ", "
-                      << ready.coord.y << ", " << ready.coord.z << ").\n";
-#endif
             entry->gpuState.store(GpuState::NotUploaded, std::memory_order_release);
             entry->meshingState.store(MeshingState::NotScheduled, std::memory_order_release);
             continue;
         }
 
         if (!IsDesired(ready.coord)) {
-            std::cout << "[Streaming] Dropped mesh upload for out-of-range chunk.\n";
             entry->gpuState.store(GpuState::NotUploaded, std::memory_order_release);
             entry->meshingState.store(MeshingState::NotScheduled, std::memory_order_release);
             continue;
@@ -318,12 +364,22 @@ void ChunkStreaming::ProcessUploads(ChunkRegistry& registry) {
             continue;
         }
 
+        const std::size_t meshBytes = ready.cpuMesh->ByteSize();
+        const bool hasBudget = uploadedBytes + meshBytes <= config_.maxGpuUploadBytesPerFrame;
+        if (!hasBudget && stats_.uploadedThisFrame > 0) {
+            enqueueDeferred(std::move(ready));
+            continue;
+        }
+
         entry->cpuMesh = std::move(*ready.cpuMesh);
         entry->cpuMeshReady.store(true, std::memory_order_release);
         entry->gpuState.store(GpuState::Uploaded, std::memory_order_release);
         MarkRegionDirtyForChunk(ready.coord);
         ++stats_.uploadedThisFrame;
+        uploadedBytes += meshBytes;
     }
+
+    stats_.uploadedBytesThisFrame = uploadedBytes;
 }
 
 void ChunkStreaming::MarkRegionDirtyForChunk(const ChunkCoord& coord) {
