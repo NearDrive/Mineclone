@@ -68,6 +68,13 @@ constexpr int kLoadRadiusMin = kRenderRadiusMin;
 constexpr int kLoadRadiusMax = 48;
 constexpr float kReachDistance = 6.0f;
 constexpr float kHighlightEpsilon = 0.015f;
+constexpr glm::vec3 kFogColorBase(0.08f, 0.10f, 0.15f);
+constexpr float kFogStartRatio = 0.70f;
+constexpr float kFogEndPaddingChunks = 0.75f;
+constexpr float kFogDensityBase = 0.0028f;
+constexpr float kFogHeightFalloffBase = 0.018f;
+constexpr float kFogDensityStep = 0.0005f;
+constexpr float kFogHeightFalloffStep = 0.004f;
 constexpr float kMaxDeltaTime = 0.05f;
 constexpr int kSmokeTestFrames = 60;
 constexpr int kSmokeEditTimeoutMs = 1000;
@@ -759,8 +766,14 @@ int main(int argc, char** argv) {
         bool statsPrintTogglePressed = false;
         bool frustumTogglePressed = false;
         bool distanceTogglePressed = false;
+        bool fogDensityDecreasePressed = false;
+        bool fogDensityIncreasePressed = false;
+        bool fogHeightDecreasePressed = false;
+        bool fogHeightIncreasePressed = false;
         bool frustumCullingEnabled = true;
         bool distanceCullingEnabled = true;
+        float fogDensityTuning = kFogDensityBase;
+        float fogHeightFalloffTuning = kFogHeightFalloffBase;
         bool statsTitleEnabled = true;
         bool statsPrintEnabled = false;
         auto lastStatsPrint = lastTime - std::chrono::seconds(5);
@@ -994,6 +1007,42 @@ int main(int argc, char** argv) {
                     distanceTogglePressed = false;
                 }
 
+                int fogDensityDecreaseState = glfwGetKey(window, GLFW_KEY_MINUS);
+                if (fogDensityDecreaseState == GLFW_PRESS && !fogDensityDecreasePressed) {
+                    fogDensityDecreasePressed = true;
+                    fogDensityTuning = std::max(0.0f, fogDensityTuning - kFogDensityStep);
+                    std::cout << "[Fog] Density set to " << fogDensityTuning << ".\n";
+                } else if (fogDensityDecreaseState == GLFW_RELEASE) {
+                    fogDensityDecreasePressed = false;
+                }
+
+                int fogDensityIncreaseState = glfwGetKey(window, GLFW_KEY_EQUAL);
+                if (fogDensityIncreaseState == GLFW_PRESS && !fogDensityIncreasePressed) {
+                    fogDensityIncreasePressed = true;
+                    fogDensityTuning = std::min(0.05f, fogDensityTuning + kFogDensityStep);
+                    std::cout << "[Fog] Density set to " << fogDensityTuning << ".\n";
+                } else if (fogDensityIncreaseState == GLFW_RELEASE) {
+                    fogDensityIncreasePressed = false;
+                }
+
+                int fogHeightDecreaseState = glfwGetKey(window, GLFW_KEY_LEFT_SHIFT);
+                if (fogHeightDecreaseState == GLFW_PRESS && !fogHeightDecreasePressed) {
+                    fogHeightDecreasePressed = true;
+                    fogHeightFalloffTuning = std::max(0.0f, fogHeightFalloffTuning - kFogHeightFalloffStep);
+                    std::cout << "[Fog] Height falloff set to " << fogHeightFalloffTuning << ".\n";
+                } else if (fogHeightDecreaseState == GLFW_RELEASE) {
+                    fogHeightDecreasePressed = false;
+                }
+
+                int fogHeightIncreaseState = glfwGetKey(window, GLFW_KEY_RIGHT_SHIFT);
+                if (fogHeightIncreaseState == GLFW_PRESS && !fogHeightIncreasePressed) {
+                    fogHeightIncreasePressed = true;
+                    fogHeightFalloffTuning = std::min(0.25f, fogHeightFalloffTuning + kFogHeightFalloffStep);
+                    std::cout << "[Fog] Height falloff set to " << fogHeightFalloffTuning << ".\n";
+                } else if (fogHeightIncreaseState == GLFW_RELEASE) {
+                    fogHeightIncreasePressed = false;
+                }
+
                 if (app::gMouseCaptured) {
                     float yawRadians = glm::radians(app::gCamera.getYaw());
                     glm::vec3 forward(std::cos(yawRadians), 0.0f, std::sin(yawRadians));
@@ -1056,7 +1105,7 @@ int main(int argc, char** argv) {
                 app::gCamera.setPosition(player.Position() + kEyeOffset);
             }
 
-            glClearColor(0.08f, 0.10f, 0.15f, 1.0f);
+            glClearColor(kFogColorBase.r, kFogColorBase.g, kFogColorBase.b, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             int width = 0;
@@ -1169,10 +1218,21 @@ int main(int argc, char** argv) {
                 }
             }
 
+            const int renderRadiusChunksForFog = streaming.RenderRadius();
+            const float chunkSize = static_cast<float>(voxel::kChunkSize);
+            const float cullDistance = (static_cast<float>(renderRadiusChunksForFog) + 1.0f) * chunkSize;
+            const float fogStart = cullDistance * kFogStartRatio;
+            const float fogEnd = cullDistance + kFogEndPaddingChunks * chunkSize;
+
             shader.use();
             shader.setMat4("uProjection", projection);
             shader.setMat4("uView", view);
             shader.setVec3("uLightDir", lightDir);
+            shader.setVec3("uFogColor", kFogColorBase);
+            shader.setFloat("uFogDensity", fogDensityTuning);
+            shader.setFloat("uFogStart", fogStart);
+            shader.setFloat("uFogEnd", fogEnd);
+            shader.setFloat("uFogHeightFalloff", fogHeightFalloffTuning);
             shader.setInt("uTexture", 0);
             glad_glActiveTexture(GL_TEXTURE0);
             glad_glBindTexture(GL_TEXTURE_2D, blockTexture);

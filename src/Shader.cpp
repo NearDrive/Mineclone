@@ -151,6 +151,13 @@ void Shader::setVec3(const std::string& name, const glm::vec3& value) const {
     }
 }
 
+void Shader::setFloat(const std::string& name, float value) const {
+    GLint location = glGetUniformLocation(programId_, name.c_str());
+    if (location >= 0) {
+        glad_glUniform1f(location, value);
+    }
+}
+
 void Shader::setInt(const std::string& name, int value) const {
     GLint location = glGetUniformLocation(programId_, name.c_str());
     if (location >= 0) {
