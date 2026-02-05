@@ -316,8 +316,10 @@ struct AppMode::WorldRuntime {
                          streaming.GenerateQueue(),
                          streaming.MeshQueue(),
                          streaming.UploadQueue(),
+                         streaming.SaveQueue(),
                          chunkRegistry,
                          mesher,
+                         &chunkStorage,
                          &profiler);
         streaming.SetWorkerThreads(workerPool.ThreadCount());
     }
