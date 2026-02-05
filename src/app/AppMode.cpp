@@ -1121,32 +1121,39 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
 
     const int renderRadiusChunks = world_->streaming.RenderRadius();
 
-    world_->chunkRegistry.ForEachEntry([&](const voxel::ChunkCoord& coord,
-                                           const std::shared_ptr<voxel::ChunkEntry>& entry) {
-        if (entry->gpuState.load(std::memory_order_acquire) != voxel::GpuState::Uploaded) {
-            return;
-        }
+    const std::vector<voxel::RegionCoord> drawableRegions = world_->streaming.CollectDrawableRegions(playerChunk);
+    for (const voxel::RegionCoord& regionCoord : drawableRegions) {
+        const int minChunkX = regionCoord.x * voxel::kRegionSizeChunksX;
+        const int minChunkZ = regionCoord.z * voxel::kRegionSizeChunksZ;
+        const int maxChunkX = minChunkX + voxel::kRegionSizeChunksX - 1;
+        const int maxChunkZ = minChunkZ + voxel::kRegionSizeChunksZ - 1;
 
         if (world_->distanceCullingEnabled) {
-            const int dx = std::abs(coord.x - playerChunk.x);
-            const int dz = std::abs(coord.z - playerChunk.z);
+            const int dx = std::max({playerChunk.x - maxChunkX, 0, minChunkX - playerChunk.x});
+            const int dz = std::max({playerChunk.z - maxChunkZ, 0, minChunkZ - playerChunk.z});
             if (std::max(dx, dz) > renderRadiusChunks) {
                 ++distanceCulled;
-                return;
+                continue;
             }
         }
 
         if (world_->frustumCullingEnabled) {
-            const voxel::ChunkBounds bounds = voxel::GetChunkBounds(coord);
-            if (!world_->frustum.IntersectsAabb(bounds.min, bounds.max)) {
+            const voxel::ChunkCoord regionMinChunk{minChunkX, playerChunk.y - world_->streaming.Config().verticalRadius,
+                                                   minChunkZ};
+            const voxel::ChunkCoord regionMaxChunk{maxChunkX, playerChunk.y + world_->streaming.Config().verticalRadius,
+                                                   maxChunkZ};
+            const voxel::ChunkBounds minBounds = voxel::GetChunkBounds(regionMinChunk);
+            const voxel::ChunkBounds maxBounds = voxel::GetChunkBounds(regionMaxChunk);
+            if (!world_->frustum.IntersectsAabb(minBounds.min, maxBounds.max)) {
                 ++frustumCulled;
-                return;
+                continue;
             }
         }
 
-        entry->mesh.Draw();
-        ++drawn;
-    });
+        if (world_->streaming.DrawRegion(regionCoord)) {
+            ++drawn;
+        }
+    }
 
     if (world_->debugDraw.HasGeometry()) {
         debugShader_.use();

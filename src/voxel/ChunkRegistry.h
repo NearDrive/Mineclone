@@ -45,6 +45,8 @@ enum class GpuState {
 
 struct ChunkEntry {
     ChunkMesh mesh;
+    ChunkMeshCpu cpuMesh;
+    std::atomic<bool> cpuMeshReady{false};
 
     std::unique_ptr<Chunk> chunk;
     std::atomic<GenerationState> generationState{GenerationState::NotScheduled};

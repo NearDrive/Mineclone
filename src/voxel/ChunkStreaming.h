@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -8,6 +9,8 @@
 #include "core/ThreadSafeQueue.h"
 #include "voxel/ChunkCoord.h"
 #include "voxel/ChunkJobs.h"
+#include "voxel/ChunkMesh.h"
+#include "voxel/RegionCoord.h"
 
 namespace persistence {
 class ChunkStorage;
@@ -35,6 +38,7 @@ struct ChunkStreamingStats {
     std::size_t generatedChunksReady = 0;
     std::size_t meshedCpuReady = 0;
     std::size_t gpuReadyChunks = 0;
+    std::size_t gpuReadyRegions = 0;
     std::size_t createQueue = 0;
     std::size_t meshQueue = 0;
     std::size_t uploadQueue = 0;
@@ -42,6 +46,12 @@ struct ChunkStreamingStats {
     int createdThisFrame = 0;
     int meshedThisFrame = 0;
     int uploadedThisFrame = 0;
+};
+
+struct RegionMeshEntry {
+    ChunkMesh mesh;
+    std::unordered_set<ChunkCoord, ChunkCoordHash> chunks;
+    bool dirty = false;
 };
 
 class ChunkStreaming {
@@ -69,9 +79,15 @@ public:
     const ChunkStreamingStats& Stats() const;
 
     bool RequestRemesh(const ChunkCoord& coord, ChunkRegistry& registry);
+    void MarkRegionDirty(const ChunkCoord& coord);
+    std::vector<RegionCoord> CollectDrawableRegions(const ChunkCoord& playerChunk) const;
+    bool DrawRegion(const RegionCoord& region) const;
 
 private:
     void ProcessUploads(ChunkRegistry& registry);
+    void MarkRegionDirtyForChunk(const ChunkCoord& coord);
+    void BuildDirtyRegionList();
+    void ProcessRegionUploads(ChunkRegistry& registry);
     void BuildDesiredSet(const ChunkCoord& playerChunk);
     void UnloadOutOfRange(ChunkRegistry& registry);
     void EnqueueMissing(ChunkRegistry& registry);
@@ -86,6 +102,8 @@ private:
     std::vector<ChunkCoord> desiredCoords_;
     std::unordered_set<ChunkCoord, ChunkCoordHash> desiredSet_;
     std::vector<ChunkCoord> unloadList_;
+    std::vector<RegionCoord> dirtyRegions_;
+    std::unordered_map<RegionCoord, RegionMeshEntry, RegionCoordHash> regions_;
 
     core::ThreadSafeQueue<GenerateJob> generateQueue_;
     core::ThreadSafeQueue<MeshJob> meshQueue_;
