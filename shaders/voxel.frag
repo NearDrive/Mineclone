@@ -4,11 +4,15 @@ in vec3 vNormal;
 in vec2 vUV;
 in float vSunlight;
 in float vEmissive;
+in float vCameraDistance;
 
 out vec4 FragColor;
 
 uniform vec3 uLightDir;
 uniform sampler2D uTexture;
+uniform vec3 uFogColor;
+uniform float uFogStart;
+uniform float uFogEnd;
 
 void main() {
     vec3 normal = normalize(vNormal);
@@ -23,5 +27,8 @@ void main() {
     vec3 litColor = baseColor * (ambient + diffuse * (1.0 - ambient));
     vec3 emissiveColor = baseColor * emissive;
     vec3 color = max(litColor, emissiveColor);
-    FragColor = vec4(color, 1.0);
+
+    float fogFactor = 1.0 - smoothstep(uFogStart, uFogEnd, vCameraDistance);
+    vec3 finalColor = mix(uFogColor, color, fogFactor);
+    FragColor = vec4(finalColor, 1.0);
 }

@@ -49,7 +49,7 @@ LightReadHandle AcquireLightRead(const ChunkCoord& coord, const ChunkRegistry& r
 } // namespace
 
 void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRegistry& registry,
-                            ChunkMeshCpu& mesh) const {
+                            ChunkMeshCpu& mesh, MeshDetailTier detailTier) const {
     mesh.Clear();
 
     const std::size_t estimatedFaces = static_cast<std::size_t>(kChunkSize) * kChunkSize * 6;
@@ -58,7 +58,9 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRe
     auto& vertices = mesh.vertices;
     auto& indices = mesh.indices;
 
-    if (lightingEnabled_) {
+    const bool detailedLighting = lightingEnabled_ && detailTier == MeshDetailTier::Near;
+
+    if (detailedLighting) {
         registry.EnsureLightForNeighborhood(coord);
     }
 
@@ -71,7 +73,7 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRe
 
     auto lightEntry = registry.TryGetEntry(coord);
     const LightChunk* currentLight = nullptr;
-    if (lightingEnabled_ && lightEntry && lightEntry->lightReady.load(std::memory_order_acquire)) {
+    if (detailedLighting && lightEntry && lightEntry->lightReady.load(std::memory_order_acquire)) {
         currentLight = &lightEntry->light;
     }
 
@@ -81,7 +83,7 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRe
     LightReadHandle lightNegY;
     LightReadHandle lightPosZ;
     LightReadHandle lightNegZ;
-    if (lightingEnabled_) {
+    if (detailedLighting) {
         lightPosX = AcquireLightRead({coord.x + 1, coord.y, coord.z}, registry);
         lightNegX = AcquireLightRead({coord.x - 1, coord.y, coord.z}, registry);
         lightPosY = AcquireLightRead({coord.x, coord.y + 1, coord.z}, registry);
@@ -122,8 +124,11 @@ void ChunkMesher::BuildMesh(const ChunkCoord& coord, const Chunk& chunk, ChunkRe
     };
 
     auto sampleLight = [&](int nx, int ny, int nz, bool sunlight) -> float {
-        if (!lightingEnabled_) {
-            return sunlight ? 1.0f : 0.0f;
+        if (!detailedLighting) {
+            if (detailTier == MeshDetailTier::Mid) {
+                return sunlight ? 0.8f : 0.0f;
+            }
+            return sunlight ? 0.65f : 0.0f;
         }
         const LightChunk* light = nullptr;
         int lx = nx;

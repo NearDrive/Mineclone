@@ -10,14 +10,17 @@ out vec3 vNormal;
 out vec2 vUV;
 out float vSunlight;
 out float vEmissive;
+out float vCameraDistance;
 
 uniform mat4 uView;
 uniform mat4 uProjection;
+uniform vec3 uCameraPos;
 
 void main() {
     vNormal = aNormal;
     vUV = aUV;
     vSunlight = aSunlight;
     vEmissive = aEmissive;
+    vCameraDistance = distance(aPos, uCameraPos);
     gl_Position = uProjection * uView * vec4(aPos, 1.0);
 }

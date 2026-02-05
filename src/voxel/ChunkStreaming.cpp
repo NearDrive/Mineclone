@@ -23,6 +23,8 @@ ChunkStreaming::ChunkStreaming(const ChunkStreamingConfig& config) : config_(con
         config_.loadRadius = config_.renderRadius;
     }
     config_.verticalRadius = std::max(0, config_.verticalRadius);
+    config_.nearDetailRadius = std::max(1, config_.nearDetailRadius);
+    config_.midDetailRadius = std::max(config_.nearDetailRadius, config_.midDetailRadius);
 }
 
 void ChunkStreaming::SetRenderRadius(int radius) {
@@ -115,7 +117,7 @@ bool ChunkStreaming::RequestRemesh(const ChunkCoord& coord, ChunkRegistry& regis
     MeshingState state = entry->meshingState.load(std::memory_order_acquire);
     while (state == MeshingState::NotScheduled || state == MeshingState::Ready) {
         if (entry->meshingState.compare_exchange_weak(state, MeshingState::Queued)) {
-            meshQueue_.push(MeshJob{coord, entry});
+            meshQueue_.push(MeshJob{coord, entry, DetailTierForCoord(coord)});
             return true;
         }
     }
@@ -202,12 +204,26 @@ void ChunkStreaming::EnqueueMissing(ChunkRegistry& registry) {
             meshQueue_.size() < config_.maxMeshQueueSize) {
             MeshingState meshExpected = MeshingState::NotScheduled;
             if (entry->meshingState.compare_exchange_strong(meshExpected, MeshingState::Queued)) {
-                meshQueue_.push(MeshJob{coord, entry});
+                meshQueue_.push(MeshJob{coord, entry, DetailTierForCoord(coord)});
                 ++stats_.meshedThisFrame;
                 --meshBudget;
             }
         }
     }
+}
+
+
+MeshDetailTier ChunkStreaming::DetailTierForCoord(const ChunkCoord& coord) const {
+    const int dx = std::abs(coord.x - stats_.playerChunk.x);
+    const int dz = std::abs(coord.z - stats_.playerChunk.z);
+    const int distance = std::max(dx, dz);
+    if (distance <= config_.nearDetailRadius) {
+        return MeshDetailTier::Near;
+    }
+    if (distance <= config_.midDetailRadius) {
+        return MeshDetailTier::Mid;
+    }
+    return MeshDetailTier::Far;
 }
 
 bool ChunkStreaming::IsDesired(const ChunkCoord& coord) const {
