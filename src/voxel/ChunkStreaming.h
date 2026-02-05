@@ -22,6 +22,8 @@ struct ChunkStreamingConfig {
     int loadRadius = 10;
     int renderRadius = 8;
     int verticalRadius = 2;
+    int nearDetailRadius = 5;
+    int midDetailRadius = 10;
     int maxChunkCreatesPerFrame = 3;
     int maxChunkMeshesPerFrame = 2;
     int maxGpuUploadsPerFrame = 3;
@@ -77,6 +79,8 @@ public:
     bool RequestRemesh(const ChunkCoord& coord, ChunkRegistry& registry);
 
 private:
+    MeshDetailTier DetailTierForCoord(const ChunkCoord& coord) const;
+
     void ProcessUploads(ChunkRegistry& registry);
     void BuildDesiredSet(const ChunkCoord& playerChunk);
     void UnloadOutOfRange(ChunkRegistry& registry);

@@ -11,6 +11,12 @@ namespace voxel {
 
 struct ChunkEntry;
 
+enum class MeshDetailTier : std::uint8_t {
+    Near,
+    Mid,
+    Far
+};
+
 struct ChunkMeshCpu {
     void Clear() {
         vertices.clear();
@@ -34,6 +40,7 @@ struct GenerateJob {
 struct MeshJob {
     ChunkCoord coord;
     std::weak_ptr<ChunkEntry> entry;
+    MeshDetailTier detailTier = MeshDetailTier::Near;
 };
 
 struct MeshReady {

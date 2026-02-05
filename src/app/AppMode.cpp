@@ -52,6 +52,8 @@ constexpr int kLoadRadiusDefault = 10;
 constexpr int kLoadRadiusMin = kRenderRadiusMin;
 constexpr int kLoadRadiusMax = 48;
 constexpr int kVerticalRadiusDefault = 2;
+constexpr int kNearDetailRadiusDefault = 5;
+constexpr int kMidDetailRadiusDefault = 10;
 constexpr int kChunkCreatesPerFrameDefault = 3;
 constexpr int kChunkMeshesPerFrameDefault = 2;
 constexpr int kGpuUploadsPerFrameDefault = 3;
@@ -318,6 +320,8 @@ struct AppMode::WorldRuntime {
         config.renderRadius = kRenderRadiusDefault;
         config.loadRadius = kLoadRadiusDefault;
         config.verticalRadius = kVerticalRadiusDefault;
+        config.nearDetailRadius = kNearDetailRadiusDefault;
+        config.midDetailRadius = kMidDetailRadiusDefault;
         config.maxChunkCreatesPerFrame = kChunkCreatesPerFrameDefault;
         config.maxChunkMeshesPerFrame = kChunkMeshesPerFrameDefault;
         config.maxGpuUploadsPerFrame = kGpuUploadsPerFrameDefault;
@@ -1224,6 +1228,10 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
     shader_.setMat4("uProjection", world_->projection);
     shader_.setMat4("uView", world_->view);
     shader_.setVec3("uLightDir", world_->lightDir);
+    shader_.setVec3("uCameraPos", gCamera.getPosition());
+    shader_.setVec3("uFogColor", glm::vec3(0.08f, 0.10f, 0.15f));
+    const float fogEnd = static_cast<float>(world_->streaming.RenderRadius() * voxel::kChunkSize);
+    shader_.setVec3("uFogParams", glm::vec3(fogEnd * 0.6f, fogEnd, 0.0f));
     shader_.setInt("uTexture", 0);
     glad_glActiveTexture(GL_TEXTURE0);
     glad_glBindTexture(GL_TEXTURE_2D, blockTexture_);

@@ -165,7 +165,7 @@ void WorkerPool::ExecuteMesh(const voxel::MeshJob& job) {
     }
 
     voxel::ChunkMeshCpu cpuMesh;
-    mesher_->BuildMesh(job.coord, chunkCopy, *registry_, cpuMesh);
+    mesher_->BuildMesh(job.coord, chunkCopy, *registry_, cpuMesh, job.detailTier);
 
     entry->meshingState.store(voxel::MeshingState::Ready, std::memory_order_release);
     entry->gpuState.store(voxel::GpuState::UploadQueued, std::memory_order_release);
