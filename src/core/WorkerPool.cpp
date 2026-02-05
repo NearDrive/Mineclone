@@ -5,6 +5,7 @@
 #include <shared_mutex>
 
 #include "core/Assert.h"
+#include "persistence/ChunkStorage.h"
 #include "voxel/ChunkMesher.h"
 #include "voxel/ChunkRegistry.h"
 
@@ -14,8 +15,10 @@ void WorkerPool::Start(std::size_t threadCount,
                        ThreadSafeQueue<voxel::GenerateJob>& generateQueue,
                        ThreadSafeQueue<voxel::MeshJob>& meshQueue,
                        ThreadSafeQueue<voxel::MeshReady>& readyQueue,
+                       ThreadSafeQueue<voxel::SaveJob>& saveQueue,
                        voxel::ChunkRegistry& registry,
                        const voxel::ChunkMesher& mesher,
+                       persistence::ChunkStorage* storage,
                        core::Profiler* profiler) {
     Stop();
 
@@ -26,8 +29,10 @@ void WorkerPool::Start(std::size_t threadCount,
     generateQueue_ = &generateQueue;
     meshQueue_ = &meshQueue;
     readyQueue_ = &readyQueue;
+    saveQueue_ = &saveQueue;
     registry_ = &registry;
     mesher_ = &mesher;
+    storage_ = storage;
     profiler_ = profiler;
 
     threads_.reserve(threadCount);
@@ -78,11 +83,18 @@ void WorkerPool::WorkerLoop() {
             continue;
         }
 
+        voxel::SaveJob saveJob;
+        if (saveQueue_ && saveQueue_->try_pop(saveJob)) {
+            ExecuteSave(saveJob);
+            continue;
+        }
+
         std::unique_lock<std::mutex> lock(wakeMutex_);
         wakeCv_.wait_for(lock, std::chrono::milliseconds(2), [&]() {
             return stop_.load() ||
                    (generateQueue_ && !generateQueue_->empty()) ||
-                   (meshQueue_ && !meshQueue_->empty());
+                   (meshQueue_ && !meshQueue_->empty()) ||
+                   (saveQueue_ && !saveQueue_->empty());
         });
     }
 }
@@ -105,7 +117,13 @@ void WorkerPool::ExecuteGenerate(const voxel::GenerateJob& job) {
     }
 
     voxel::Chunk chunk;
-    voxel::ChunkRegistry::GenerateChunkData(job.coord, chunk);
+    bool loaded = false;
+    if (storage_) {
+        loaded = storage_->LoadChunk(job.coord, chunk);
+    }
+    if (!loaded) {
+        voxel::ChunkRegistry::GenerateChunkData(job.coord, chunk);
+    }
 
     {
         std::unique_lock<std::shared_mutex> lock(entry->dataMutex);
@@ -118,6 +136,14 @@ void WorkerPool::ExecuteGenerate(const voxel::GenerateJob& job) {
     if (!entry->wanted.load()) {
         std::cout << "[Workers] Generated chunk then found it unloaded.\n";
     }
+}
+
+
+void WorkerPool::ExecuteSave(const voxel::SaveJob& job) {
+    if (!storage_ || !job.chunk) {
+        return;
+    }
+    storage_->SaveChunk(job.coord, *job.chunk);
 }
 
 void WorkerPool::ExecuteMesh(const voxel::MeshJob& job) {

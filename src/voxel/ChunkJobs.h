@@ -10,6 +10,7 @@
 
 namespace voxel {
 
+struct Chunk;
 struct ChunkEntry;
 
 struct ChunkMeshCpu {
@@ -45,6 +46,11 @@ struct MeshReady {
     ChunkCoord coord;
     std::weak_ptr<ChunkEntry> entry;
     std::shared_ptr<ChunkMeshCpu> cpuMesh;
+};
+
+struct SaveJob {
+    ChunkCoord coord;
+    std::shared_ptr<const Chunk> chunk;
 };
 
 } // namespace voxel
