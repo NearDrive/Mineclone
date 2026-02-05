@@ -46,6 +46,8 @@ private:
 
     void HandleMenuInput();
     void HandlePlayingInput();
+    void DrawMenuUi();
+    void ActivateMenuAction(int actionIndex);
 
     void UpdateMenuTitle(bool force);
 
@@ -80,7 +82,10 @@ private:
     bool key1Pressed_ = false;
     bool key2Pressed_ = false;
     bool key3Pressed_ = false;
+    bool key4Pressed_ = false;
+    bool key5Pressed_ = false;
     bool escPressed_ = false;
+    bool mouseLeftPressed_ = false;
 
     std::chrono::steady_clock::time_point lastTitleUpdate_{};
     std::chrono::steady_clock::time_point lastTime_{};
@@ -97,6 +102,7 @@ private:
     Shader debugShader_;
     Shader postProcessShader_;
     DebugDraw loadingBarDraw_;
+    DebugDraw menuUiDraw_;
     GLuint blockTexture_ = 0;
     GLuint postProcessFbo_ = 0;
     GLuint postProcessColorTexture_ = 0;

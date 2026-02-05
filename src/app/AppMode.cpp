@@ -55,8 +55,7 @@ constexpr float kFogStartRatio = 0.70f;
 constexpr float kFogEndPaddingChunks = 0.75f;
 constexpr float kFogDensity = 0.0028f;
 constexpr float kFogHeightFalloff = 0.018f;
-// Keep default off so baseline visuals/aiming remain unchanged unless players opt in.
-constexpr bool kCurvatureDefaultEnabled = false;
+constexpr bool kCurvatureDefaultEnabled = true;
 constexpr float kCurvatureDefaultStrength = 0.018f;
 constexpr float kCurvatureStrengthStep = 0.004f;
 constexpr float kCurvatureStrengthMin = 0.0f;
@@ -405,6 +404,30 @@ struct AppMode::WorldRuntime {
     int workerThreadsTarget = kWorkerThreadsDefault;
 };
 
+constexpr int kPauseMenuButtonCount = 5;
+
+int PauseMenuButtonIndexAtNdc(float ndcX, float ndcY) {
+    constexpr float kLeft = -0.55f;
+    constexpr float kRight = 0.55f;
+    constexpr float kButtonHeight = 0.16f;
+    constexpr float kGap = 0.06f;
+    constexpr float kTop = 0.78f;
+
+    if (ndcX < kLeft || ndcX > kRight) {
+        return -1;
+    }
+
+    for (int i = 0; i < kPauseMenuButtonCount; ++i) {
+        const float top = kTop - static_cast<float>(i) * (kButtonHeight + kGap);
+        const float bottom = top - kButtonHeight;
+        if (ndcY <= top && ndcY >= bottom) {
+            return i + 1;
+        }
+    }
+
+    return -1;
+}
+
 std::string StateLabel(GameState state) {
     switch (state) {
         case GameState::MainMenu:
@@ -643,10 +666,12 @@ void AppMode::Tick() {
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         }
         UpdateMenuTitle(false);
+        DrawMenuUi();
     } else if (state_ == GameState::MainMenu) {
         glClearColor(0.08f, 0.10f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         UpdateMenuTitle(false);
+        DrawMenuUi();
     }
 }
 
@@ -701,19 +726,53 @@ void AppMode::SetState(GameState state) {
     UpdateMenuTitle(true);
 }
 
+void AppMode::ActivateMenuAction(int actionIndex) {
+    if (state_ == GameState::MainMenu) {
+        if (actionIndex == 1) {
+            StartNewWorld(GenerateNewWorldId());
+        } else if (actionIndex == 2) {
+            StartLoadedWorld();
+        } else if (actionIndex == 3) {
+            SetState(GameState::Exiting);
+            shouldExit_ = true;
+            glfwSetWindowShouldClose(window_, GLFW_TRUE);
+        }
+        return;
+    }
+
+    if (state_ != GameState::PauseMenu) {
+        return;
+    }
+
+    if (actionIndex == 1) {
+        SetState(GameState::Playing);
+    } else if (actionIndex == 2) {
+        if (!SaveWorld()) {
+            std::cout << "[Storage] Save failed or no world loaded.\n";
+        }
+    } else if (actionIndex == 3) {
+        StartLoadedWorld();
+    } else if (actionIndex == 4) {
+        if (world_) {
+            world_->curvatureEnabled = !world_->curvatureEnabled;
+            std::cout << "[Settings] Curvature " << (world_->curvatureEnabled ? "enabled" : "disabled")
+                      << " (strength=" << world_->curvatureStrength << ").\n";
+        }
+    } else if (actionIndex == 5) {
+        StopWorldAndReturnToMenu();
+    }
+}
+
 void AppMode::HandleMenuInput() {
     if (state_ != GameState::MainMenu && state_ != GameState::PauseMenu) {
+        menuUiDraw_.Clear();
         return;
     }
 
     const int key1State = glfwGetKey(window_, GLFW_KEY_1);
     if (key1State == GLFW_PRESS && !key1Pressed_) {
         key1Pressed_ = true;
-        if (state_ == GameState::MainMenu) {
-            StartNewWorld(GenerateNewWorldId());
-        } else if (state_ == GameState::PauseMenu) {
-            SetState(GameState::Playing);
-        }
+        ActivateMenuAction(1);
     } else if (key1State == GLFW_RELEASE) {
         key1Pressed_ = false;
     }
@@ -721,13 +780,7 @@ void AppMode::HandleMenuInput() {
     const int key2State = glfwGetKey(window_, GLFW_KEY_2);
     if (key2State == GLFW_PRESS && !key2Pressed_) {
         key2Pressed_ = true;
-        if (state_ == GameState::MainMenu) {
-            StartLoadedWorld();
-        } else if (state_ == GameState::PauseMenu) {
-            if (!SaveWorld()) {
-                std::cout << "[Storage] Save failed or no world loaded.\n";
-            }
-        }
+        ActivateMenuAction(2);
     } else if (key2State == GLFW_RELEASE) {
         key2Pressed_ = false;
     }
@@ -735,16 +788,87 @@ void AppMode::HandleMenuInput() {
     const int key3State = glfwGetKey(window_, GLFW_KEY_3);
     if (key3State == GLFW_PRESS && !key3Pressed_) {
         key3Pressed_ = true;
-        if (state_ == GameState::MainMenu) {
-            SetState(GameState::Exiting);
-            shouldExit_ = true;
-            glfwSetWindowShouldClose(window_, GLFW_TRUE);
-        } else if (state_ == GameState::PauseMenu) {
-            StopWorldAndReturnToMenu();
-        }
+        ActivateMenuAction(3);
     } else if (key3State == GLFW_RELEASE) {
         key3Pressed_ = false;
     }
+
+    const int key4State = glfwGetKey(window_, GLFW_KEY_4);
+    if (key4State == GLFW_PRESS && !key4Pressed_) {
+        key4Pressed_ = true;
+        ActivateMenuAction(4);
+    } else if (key4State == GLFW_RELEASE) {
+        key4Pressed_ = false;
+    }
+
+    const int key5State = glfwGetKey(window_, GLFW_KEY_5);
+    if (key5State == GLFW_PRESS && !key5Pressed_) {
+        key5Pressed_ = true;
+        ActivateMenuAction(5);
+    } else if (key5State == GLFW_RELEASE) {
+        key5Pressed_ = false;
+    }
+
+    const int leftMouseState = glfwGetMouseButton(window_, GLFW_MOUSE_BUTTON_LEFT);
+    if (leftMouseState == GLFW_PRESS && !mouseLeftPressed_) {
+        mouseLeftPressed_ = true;
+        double mouseX = 0.0;
+        double mouseY = 0.0;
+        glfwGetCursorPos(window_, &mouseX, &mouseY);
+        int fbWidth = 0;
+        int fbHeight = 0;
+        glfwGetFramebufferSize(window_, &fbWidth, &fbHeight);
+        if (fbWidth > 0 && fbHeight > 0) {
+            const float ndcX = static_cast<float>((mouseX / static_cast<double>(fbWidth)) * 2.0 - 1.0);
+            const float ndcY = static_cast<float>(1.0 - (mouseY / static_cast<double>(fbHeight)) * 2.0);
+            const int clicked = PauseMenuButtonIndexAtNdc(ndcX, ndcY);
+            if (clicked > 0) {
+                ActivateMenuAction(clicked);
+            }
+        }
+    } else if (leftMouseState == GLFW_RELEASE) {
+        mouseLeftPressed_ = false;
+    }
+}
+
+void AppMode::DrawMenuUi() {
+    menuUiDraw_.Clear();
+
+    const bool isPauseMenu = state_ == GameState::PauseMenu;
+    const int buttonCount = isPauseMenu ? kPauseMenuButtonCount : 3;
+    constexpr float left = -0.55f;
+    constexpr float right = 0.55f;
+    constexpr float buttonHeight = 0.16f;
+    constexpr float gap = 0.06f;
+    constexpr float topStart = 0.78f;
+
+    std::vector<glm::vec3> vertices;
+    vertices.reserve(static_cast<std::size_t>(buttonCount) * 8);
+    for (int i = 0; i < buttonCount; ++i) {
+        const float top = topStart - static_cast<float>(i) * (buttonHeight + gap);
+        const float bottom = top - buttonHeight;
+        vertices.push_back({left, top, 0.0f});
+        vertices.push_back({right, top, 0.0f});
+        vertices.push_back({right, top, 0.0f});
+        vertices.push_back({right, bottom, 0.0f});
+        vertices.push_back({right, bottom, 0.0f});
+        vertices.push_back({left, bottom, 0.0f});
+        vertices.push_back({left, bottom, 0.0f});
+        vertices.push_back({left, top, 0.0f});
+    }
+
+    menuUiDraw_.UpdateLineList(vertices);
+    if (!menuUiDraw_.HasGeometry()) {
+        return;
+    }
+
+    glDisable(GL_DEPTH_TEST);
+    debugShader_.use();
+    debugShader_.setMat4("uProjection", glm::mat4(1.0f));
+    debugShader_.setMat4("uView", glm::mat4(1.0f));
+    debugShader_.setVec3("uColor", isPauseMenu ? glm::vec3(0.5f, 0.9f, 0.95f) : glm::vec3(0.8f, 0.75f, 0.95f));
+    menuUiDraw_.Draw();
+    glEnable(GL_DEPTH_TEST);
 }
 
 void AppMode::HandlePlayingInput() {
