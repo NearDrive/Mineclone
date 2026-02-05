@@ -31,7 +31,7 @@ public:
     std::size_t IndexCount() const;
     std::size_t GpuIndexCount() const;
 
-    void UploadToGpu();
+    void UploadToGpu(bool orphan = true);
     void DestroyGpu();
     void Draw() const;
 

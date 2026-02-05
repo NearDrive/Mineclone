@@ -57,7 +57,7 @@ std::size_t ChunkMesh::GpuIndexCount() const {
     return gpuIndexCount_;
 }
 
-void ChunkMesh::UploadToGpu() {
+void ChunkMesh::UploadToGpu(bool orphan) {
     MC_ASSERT_MAIN_THREAD_GL();
     if (vao_ == 0) {
         glad_glGenVertexArrays(1, &vao_);
@@ -72,12 +72,26 @@ void ChunkMesh::UploadToGpu() {
     glad_glBindVertexArray(vao_);
 
     glad_glBindBuffer(GL_ARRAY_BUFFER, vbo_);
-    glad_glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(vertices_.size() * sizeof(VoxelVertex)),
-                      vertices_.data(), GL_STATIC_DRAW);
+    const GLsizeiptr vertexBytes = static_cast<GLsizeiptr>(vertices_.size() * sizeof(VoxelVertex));
+    if (orphan) {
+        glad_glBufferData(GL_ARRAY_BUFFER, vertexBytes, nullptr, GL_STREAM_DRAW);
+        if (vertexBytes > 0) {
+            glad_glBufferSubData(GL_ARRAY_BUFFER, 0, vertexBytes, vertices_.data());
+        }
+    } else {
+        glad_glBufferData(GL_ARRAY_BUFFER, vertexBytes, vertices_.data(), GL_STATIC_DRAW);
+    }
 
     glad_glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_);
-    glad_glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indices_.size() * sizeof(std::uint32_t)),
-                      indices_.data(), GL_STATIC_DRAW);
+    const GLsizeiptr indexBytes = static_cast<GLsizeiptr>(indices_.size() * sizeof(std::uint32_t));
+    if (orphan) {
+        glad_glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBytes, nullptr, GL_STREAM_DRAW);
+        if (indexBytes > 0) {
+            glad_glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, indexBytes, indices_.data());
+        }
+    } else {
+        glad_glBufferData(GL_ELEMENT_ARRAY_BUFFER, indexBytes, indices_.data(), GL_STATIC_DRAW);
+    }
     gpuIndexCount_ = indices_.size();
 
     glad_glEnableVertexAttribArray(0);

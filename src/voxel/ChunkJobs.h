@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -12,6 +13,10 @@ namespace voxel {
 struct ChunkEntry;
 
 struct ChunkMeshCpu {
+    std::size_t ByteSize() const {
+        return vertices.size() * sizeof(VoxelVertex) + indices.size() * sizeof(std::uint32_t);
+    }
+
     void Clear() {
         vertices.clear();
         indices.clear();

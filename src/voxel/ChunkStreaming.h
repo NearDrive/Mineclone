@@ -28,6 +28,7 @@ struct ChunkStreamingConfig {
     int maxChunkCreatesPerFrame = 3;
     int maxChunkMeshesPerFrame = 2;
     int maxGpuUploadsPerFrame = 3;
+    std::size_t maxGpuUploadBytesPerFrame = 8 * 1024 * 1024;
     int workerThreads = 2;
     bool enabled = true;
 };
@@ -46,6 +47,7 @@ struct ChunkStreamingStats {
     int createdThisFrame = 0;
     int meshedThisFrame = 0;
     int uploadedThisFrame = 0;
+    std::size_t uploadedBytesThisFrame = 0;
 };
 
 struct RegionMeshEntry {
@@ -103,6 +105,7 @@ private:
     std::unordered_set<ChunkCoord, ChunkCoordHash> desiredSet_;
     std::vector<ChunkCoord> unloadList_;
     std::vector<RegionCoord> dirtyRegions_;
+    std::vector<MeshReady> deferredUploads_;
     std::unordered_map<RegionCoord, RegionMeshEntry, RegionCoordHash> regions_;
 
     core::ThreadSafeQueue<GenerateJob> generateQueue_;
