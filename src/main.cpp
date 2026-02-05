@@ -1185,8 +1185,7 @@ int main(int argc, char** argv) {
             shader.setVec3("uCameraPos", app::gCamera.getPosition());
             shader.setVec3("uFogColor", glm::vec3(0.08f, 0.10f, 0.15f));
             const float fogEnd = static_cast<float>(streaming.RenderRadius() * voxel::kChunkSize);
-            shader.setFloat("uFogStart", fogEnd * 0.6f);
-            shader.setFloat("uFogEnd", fogEnd);
+            shader.setVec3("uFogParams", glm::vec3(fogEnd * 0.6f, fogEnd, 0.0f));
             shader.setInt("uTexture", 0);
             glad_glActiveTexture(GL_TEXTURE0);
             glad_glBindTexture(GL_TEXTURE_2D, blockTexture);
