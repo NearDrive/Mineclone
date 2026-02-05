@@ -18,6 +18,14 @@ public:
         cv_.notify_one();
     }
 
+    void push_front(T value) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            queue_.push_front(std::move(value));
+        }
+        cv_.notify_one();
+    }
+
     bool try_pop(T& out) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (queue_.empty()) {
