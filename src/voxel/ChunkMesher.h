@@ -14,7 +14,7 @@ public:
                    ChunkMeshCpu& mesh, MeshDetailTier detailTier = MeshDetailTier::Near) const;
 
 private:
-    bool lightingEnabled_ = true;
+    bool lightingEnabled_ = false;
 };
 
 } // namespace voxel

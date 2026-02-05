@@ -33,27 +33,6 @@ void RequestNeighborRemesh(const ChunkCoord& base, const LocalCoord& local,
     }
 }
 
-void MarkNeighborLightDirty(const ChunkCoord& base, const LocalCoord& local, ChunkRegistry& registry) {
-    registry.MarkLightDirty(base);
-
-    if (local.x == 0) {
-        registry.MarkLightDirty({base.x - 1, base.y, base.z});
-    } else if (local.x == kChunkSize - 1) {
-        registry.MarkLightDirty({base.x + 1, base.y, base.z});
-    }
-
-    if (local.y == 0) {
-        registry.MarkLightDirty({base.x, base.y - 1, base.z});
-    } else if (local.y == kChunkSize - 1) {
-        registry.MarkLightDirty({base.x, base.y + 1, base.z});
-    }
-
-    if (local.z == 0) {
-        registry.MarkLightDirty({base.x, base.y, base.z - 1});
-    } else if (local.z == kChunkSize - 1) {
-        registry.MarkLightDirty({base.x, base.y, base.z + 1});
-    }
-}
 }
 
 bool TrySetBlock(ChunkRegistry& registry, ChunkStreaming& streaming, const WorldBlockCoord& world, BlockId id) {
@@ -71,7 +50,6 @@ bool TrySetBlock(ChunkRegistry& registry, ChunkStreaming& streaming, const World
 
     const ChunkCoord chunkCoord = WorldToChunkCoord(world, kChunkSize);
     const LocalCoord local = WorldToLocalCoord(world, kChunkSize);
-    MarkNeighborLightDirty(chunkCoord, local, registry);
     RequestNeighborRemesh(chunkCoord, local, streaming, registry);
     return true;
 }
