@@ -147,20 +147,20 @@ void Shader::setMat4(const std::string& name, const glm::mat4& value) const {
 void Shader::setVec3(const std::string& name, const glm::vec3& value) const {
     GLint location = glGetUniformLocation(programId_, name.c_str());
     if (location >= 0) {
-        glad_glUniform3fv(location, 1, &value[0]);
+        glUniform3fv(location, 1, &value[0]);
     }
 }
 
 void Shader::setFloat(const std::string& name, float value) const {
     GLint location = glGetUniformLocation(programId_, name.c_str());
     if (location >= 0) {
-        glad_glUniform1f(location, value);
+        glUniform1f(location, value);
     }
 }
 
 void Shader::setInt(const std::string& name, int value) const {
     GLint location = glGetUniformLocation(programId_, name.c_str());
     if (location >= 0) {
-        glad_glUniform1i(location, value);
+        glUniform1i(location, value);
     }
 }
