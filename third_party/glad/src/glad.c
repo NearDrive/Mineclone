@@ -33,6 +33,7 @@ PFNGLBUFFERDATAPROC glad_glBufferData = NULL;
 PFNGLENABLEVERTEXATTRIBARRAYPROC glad_glEnableVertexAttribArray = NULL;
 PFNGLVERTEXATTRIBPOINTERPROC glad_glVertexAttribPointer = NULL;
 PFNGLGETUNIFORMLOCATIONPROC glad_glGetUniformLocation = NULL;
+PFNGLUNIFORM1FPROC glad_glUniform1f = NULL;
 PFNGLUNIFORM1IPROC glad_glUniform1i = NULL;
 PFNGLUNIFORM3FVPROC glad_glUniform3fv = NULL;
 PFNGLUNIFORMMATRIX4FVPROC glad_glUniformMatrix4fv = NULL;
@@ -103,6 +104,7 @@ int gladLoadGLLoader(GLADloadproc load) {
     glad_glEnableVertexAttribArray = (PFNGLENABLEVERTEXATTRIBARRAYPROC)glad_get_proc(load, "glEnableVertexAttribArray");
     glad_glVertexAttribPointer = (PFNGLVERTEXATTRIBPOINTERPROC)glad_get_proc(load, "glVertexAttribPointer");
     glad_glGetUniformLocation = (PFNGLGETUNIFORMLOCATIONPROC)glad_get_proc(load, "glGetUniformLocation");
+    glad_glUniform1f = (PFNGLUNIFORM1FPROC)glad_get_proc(load, "glUniform1f");
     glad_glUniform1i = (PFNGLUNIFORM1IPROC)glad_get_proc(load, "glUniform1i");
     glad_glUniform3fv = (PFNGLUNIFORM3FVPROC)glad_get_proc(load, "glUniform3fv");
     glad_glUniformMatrix4fv = (PFNGLUNIFORMMATRIX4FVPROC)glad_get_proc(load, "glUniformMatrix4fv");
@@ -142,7 +144,7 @@ int gladLoadGLLoader(GLADloadproc load) {
         !glad_glDeleteShader || !glad_glUseProgram || !glad_glDeleteProgram || !glad_glGenVertexArrays ||
         !glad_glBindVertexArray || !glad_glGenBuffers || !glad_glBindBuffer || !glad_glBufferData ||
         !glad_glEnableVertexAttribArray || !glad_glVertexAttribPointer || !glad_glGetUniformLocation ||
-        !glad_glUniform1i || !glad_glUniform3fv || !glad_glUniformMatrix4fv || !glad_glDrawElements ||
+        !glad_glUniform1f || !glad_glUniform1i || !glad_glUniform3fv || !glad_glUniformMatrix4fv || !glad_glDrawElements ||
         !glad_glDrawArrays ||
         !glad_glGenTextures || !glad_glBindTexture || !glad_glTexImage2D || !glad_glTexParameteri ||
         !glad_glGenFramebuffers || !glad_glBindFramebuffer || !glad_glFramebufferTexture2D ||
