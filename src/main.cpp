@@ -726,6 +726,7 @@ int main(int argc, char** argv) {
         streamingConfig.maxChunkCreatesPerFrame = 3;
         streamingConfig.maxChunkMeshesPerFrame = 2;
         streamingConfig.maxGpuUploadsPerFrame = 3;
+        streamingConfig.maxRegionUploadsPerFrame = 2;
         streamingConfig.workerThreads = runSoakTest
             ? kSoakWorkerThreads
             : (interactionTest ? kInteractionWorkerThreads : (smokeTest ? 0 : 2));
@@ -792,6 +793,9 @@ int main(int argc, char** argv) {
         int lastCreates = 0;
         int lastMeshes = 0;
         int lastUploads = 0;
+        int lastRegionUploads = 0;
+        std::size_t lastRegionUploadIndices = 0;
+        std::size_t lastRegionDeferred = 0;
         voxel::RaycastHit currentHit;
         bool hasTarget = false;
         bool spacePressed = false;
@@ -1568,6 +1572,9 @@ int main(int argc, char** argv) {
         lastCreates = streamStats.createdThisFrame;
         lastMeshes = streamStats.meshedThisFrame;
         lastUploads = streamStats.uploadedThisFrame;
+        lastRegionUploads = streamStats.regionsUploadedThisFrame;
+        lastRegionUploadIndices = streamStats.regionUploadedIndicesThisFrame;
+        lastRegionDeferred = streamStats.regionDeferredThisFrame;
         lastDrawnChunks = drawn;
         lastFrustumCulled = frustumCulled;
         lastDistanceCulled = distanceCulled;
@@ -1652,6 +1659,8 @@ int main(int argc, char** argv) {
                       << " | Loaded: " << lastLoadedChunks
                       << " | GPU: " << lastGpuReadyChunks
                       << " | Q: " << lastCreateQueue << "/" << lastMeshQueue << "/" << lastUploadQueue
+                      << " | RUp: " << lastRegionUploads << "/" << lastRegionDeferred
+                      << " (idx " << lastRegionUploadIndices << ")"
                       << " | Drawn: " << lastDrawnChunks;
             }
 
@@ -1677,7 +1686,9 @@ int main(int argc, char** argv) {
                              << "ms/job (" << snapshot.counts[metricIndex(core::Metric::Mesh)] << ")"
                              << " loaded " << lastLoadedChunks
                              << " gpu " << lastGpuReadyChunks
-                             << " q " << lastCreateQueue << "/" << lastMeshQueue << "/" << lastUploadQueue;
+                             << " q " << lastCreateQueue << "/" << lastMeshQueue << "/" << lastUploadQueue
+                             << " rup " << lastRegionUploads << "/" << lastRegionDeferred
+                             << " ridx " << lastRegionUploadIndices;
                     std::cout << perfLine.str() << '\n';
                     lastStatsPrint = now;
                 }

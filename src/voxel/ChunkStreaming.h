@@ -31,6 +31,8 @@ struct ChunkStreamingConfig {
     int maxChunkMeshesPerFrame = 2;
     int maxGpuUploadsPerFrame = 3;
     std::size_t maxGpuUploadBytesPerFrame = 8 * 1024 * 1024;
+    int maxRegionUploadsPerFrame = 2;
+    std::size_t maxRegionUploadIndicesPerFrame = 0;
     int workerThreads = 2;
     bool enabled = true;
 };
@@ -50,6 +52,9 @@ struct ChunkStreamingStats {
     int meshedThisFrame = 0;
     int uploadedThisFrame = 0;
     std::size_t uploadedBytesThisFrame = 0;
+    int regionsUploadedThisFrame = 0;
+    std::size_t regionUploadedIndicesThisFrame = 0;
+    std::size_t regionDeferredThisFrame = 0;
 };
 
 struct RegionMeshEntry {
