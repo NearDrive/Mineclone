@@ -55,6 +55,12 @@ constexpr float kFogStartRatio = 0.70f;
 constexpr float kFogEndPaddingChunks = 0.75f;
 constexpr float kFogDensity = 0.0028f;
 constexpr float kFogHeightFalloff = 0.018f;
+// Keep default off so baseline visuals/aiming remain unchanged unless players opt in.
+constexpr bool kCurvatureDefaultEnabled = false;
+constexpr float kCurvatureDefaultStrength = 0.018f;
+constexpr float kCurvatureStrengthStep = 0.004f;
+constexpr float kCurvatureStrengthMin = 0.0f;
+constexpr float kCurvatureStrengthMax = 0.08f;
 constexpr int kWorkerThreadsDefault = 2;
 constexpr int kSmokeMenuWorldFrames = 60;
 constexpr float kLoadingMinDisplaySeconds = 0.2f;
@@ -359,6 +365,9 @@ struct AppMode::WorldRuntime {
     bool frustumTogglePressed = false;
     bool distanceTogglePressed = false;
     bool spacePressed = false;
+    bool curvatureTogglePressed = false;
+    bool curvatureDecreasePressed = false;
+    bool curvatureIncreasePressed = false;
 #ifndef NDEBUG
     bool resetPressed = false;
 #endif
@@ -366,6 +375,8 @@ struct AppMode::WorldRuntime {
     bool distanceCullingEnabled = true;
     bool statsTitleEnabled = true;
     bool statsPrintEnabled = false;
+    bool curvatureEnabled = kCurvatureDefaultEnabled;
+    float curvatureStrength = kCurvatureDefaultStrength;
 
     std::chrono::steady_clock::time_point fpsTimer{};
     std::chrono::steady_clock::time_point lastStatsPrint{};
@@ -450,8 +461,16 @@ void AppMode::InitializeShaders() {
         return;
     }
 
+    Shader postShader;
+    if (!postShader.loadFromFiles("shaders/postprocess_screen.vert", "shaders/postprocess_curvature.frag", shaderError)) {
+        initError_ = "[Shader] " + shaderError;
+        initialized_ = false;
+        return;
+    }
+
     shader_ = std::move(shader);
     debugShader_ = std::move(debugShader);
+    postProcessShader_ = std::move(postShader);
     initialized_ = true;
 }
 
@@ -460,7 +479,123 @@ void AppMode::InitializeTextures() {
     if (blockTexture_ == 0) {
         initError_ = "[Texture] Failed to create block atlas texture.";
         initialized_ = false;
+        return;
     }
+
+    InitializePostProcessResources();
+}
+
+void AppMode::InitializePostProcessResources() {
+    int width = 0;
+    int height = 0;
+    glfwGetFramebufferSize(window_, &width, &height);
+
+    constexpr float quadVertices[] = {
+        -1.0f, -1.0f, 0.0f, 0.0f,
+         1.0f, -1.0f, 1.0f, 0.0f,
+        -1.0f,  1.0f, 0.0f, 1.0f,
+        -1.0f,  1.0f, 0.0f, 1.0f,
+         1.0f, -1.0f, 1.0f, 0.0f,
+         1.0f,  1.0f, 1.0f, 1.0f,
+    };
+
+    glad_glGenVertexArrays(1, &postProcessQuadVao_);
+    glad_glGenBuffers(1, &postProcessQuadVbo_);
+    glad_glBindVertexArray(postProcessQuadVao_);
+    glad_glBindBuffer(GL_ARRAY_BUFFER, postProcessQuadVbo_);
+    glad_glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+    glad_glEnableVertexAttribArray(0);
+    glad_glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), reinterpret_cast<void*>(0));
+    glad_glEnableVertexAttribArray(1);
+    glad_glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+                               reinterpret_cast<void*>(2 * sizeof(float)));
+    glad_glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glad_glBindVertexArray(0);
+
+    if (!EnsurePostProcessTarget(width, height)) {
+        std::cout << "[PostProcess] Failed to initialize offscreen target. Falling back to direct rendering.\n";
+    }
+}
+
+bool AppMode::EnsurePostProcessTarget(int width, int height) {
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    if (postProcessFbo_ != 0 && width == postProcessWidth_ && height == postProcessHeight_) {
+        return postProcessAvailable_;
+    }
+
+    DestroyPostProcessTarget();
+
+    glad_glGenFramebuffers(1, &postProcessFbo_);
+    glad_glBindFramebuffer(GL_FRAMEBUFFER, postProcessFbo_);
+
+    glad_glGenTextures(1, &postProcessColorTexture_);
+    glad_glBindTexture(GL_TEXTURE_2D, postProcessColorTexture_);
+    glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glad_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, postProcessColorTexture_, 0);
+
+    glad_glGenRenderbuffers(1, &postProcessDepthStencilRbo_);
+    glad_glBindRenderbuffer(GL_RENDERBUFFER, postProcessDepthStencilRbo_);
+    glad_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+    glad_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
+                                   postProcessDepthStencilRbo_);
+
+    const GLenum status = glad_glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glad_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glad_glBindTexture(GL_TEXTURE_2D, 0);
+    glad_glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+    postProcessWidth_ = width;
+    postProcessHeight_ = height;
+    postProcessAvailable_ = (status == GL_FRAMEBUFFER_COMPLETE);
+
+    if (!postProcessAvailable_) {
+        std::cout << "[PostProcess] Framebuffer incomplete (status=" << status
+                  << "). Falling back to direct rendering.\n";
+        DestroyPostProcessTarget();
+        return false;
+    }
+
+    return true;
+}
+
+void AppMode::DestroyPostProcessTarget() {
+    if (postProcessDepthStencilRbo_ != 0) {
+        glad_glDeleteRenderbuffers(1, &postProcessDepthStencilRbo_);
+        postProcessDepthStencilRbo_ = 0;
+    }
+    if (postProcessColorTexture_ != 0) {
+        glad_glDeleteTextures(1, &postProcessColorTexture_);
+        postProcessColorTexture_ = 0;
+    }
+    if (postProcessFbo_ != 0) {
+        glad_glDeleteFramebuffers(1, &postProcessFbo_);
+        postProcessFbo_ = 0;
+    }
+    postProcessWidth_ = 0;
+    postProcessHeight_ = 0;
+    postProcessAvailable_ = false;
+}
+
+void AppMode::DrawPostProcessPass() {
+    postProcessShader_.use();
+    postProcessShader_.setInt("uSceneColor", 0);
+    postProcessShader_.setInt("uCurvatureEnabled", world_ && world_->curvatureEnabled ? 1 : 0);
+    postProcessShader_.setFloat("uCurvatureStrength", world_ ? world_->curvatureStrength : kCurvatureDefaultStrength);
+
+    glad_glActiveTexture(GL_TEXTURE0);
+    glad_glBindTexture(GL_TEXTURE_2D, postProcessColorTexture_);
+
+    glDisable(GL_DEPTH_TEST);
+    glad_glBindVertexArray(postProcessQuadVao_);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
+    glad_glBindVertexArray(0);
+    glEnable(GL_DEPTH_TEST);
 }
 
 void AppMode::Tick() {
@@ -518,6 +653,16 @@ void AppMode::Shutdown() {
     if (world_) {
         StopWorldAndReturnToMenu();
     }
+    DestroyPostProcessTarget();
+    if (postProcessQuadVbo_ != 0) {
+        glad_glDeleteBuffers(1, &postProcessQuadVbo_);
+        postProcessQuadVbo_ = 0;
+    }
+    if (postProcessQuadVao_ != 0) {
+        glad_glDeleteVertexArrays(1, &postProcessQuadVao_);
+        postProcessQuadVao_ = 0;
+    }
+
     if (blockTexture_ != 0) {
         glad_glDeleteTextures(1, &blockTexture_);
         blockTexture_ = 0;
@@ -965,6 +1110,36 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
             world_->streamingTogglePressed = false;
         }
 
+        int curvatureToggleState = glfwGetKey(window_, GLFW_KEY_C);
+        if (curvatureToggleState == GLFW_PRESS && !world_->curvatureTogglePressed) {
+            world_->curvatureTogglePressed = true;
+            world_->curvatureEnabled = !world_->curvatureEnabled;
+            std::cout << "[PostProcess] Curvature " << (world_->curvatureEnabled ? "enabled" : "disabled")
+                      << " (strength=" << world_->curvatureStrength << ").\n";
+        } else if (curvatureToggleState == GLFW_RELEASE) {
+            world_->curvatureTogglePressed = false;
+        }
+
+        int curvatureDecreaseState = glfwGetKey(window_, GLFW_KEY_KP_SUBTRACT);
+        if (curvatureDecreaseState == GLFW_PRESS && !world_->curvatureDecreasePressed) {
+            world_->curvatureDecreasePressed = true;
+            world_->curvatureStrength =
+                std::max(kCurvatureStrengthMin, world_->curvatureStrength - kCurvatureStrengthStep);
+            std::cout << "[PostProcess] Curvature strength: " << world_->curvatureStrength << "\n";
+        } else if (curvatureDecreaseState == GLFW_RELEASE) {
+            world_->curvatureDecreasePressed = false;
+        }
+
+        int curvatureIncreaseState = glfwGetKey(window_, GLFW_KEY_KP_ADD);
+        if (curvatureIncreaseState == GLFW_PRESS && !world_->curvatureIncreasePressed) {
+            world_->curvatureIncreasePressed = true;
+            world_->curvatureStrength =
+                std::min(kCurvatureStrengthMax, world_->curvatureStrength + kCurvatureStrengthStep);
+            std::cout << "[PostProcess] Curvature strength: " << world_->curvatureStrength << "\n";
+        } else if (curvatureIncreaseState == GLFW_RELEASE) {
+            world_->curvatureIncreasePressed = false;
+        }
+
         int frustumToggleState = glfwGetKey(window_, GLFW_KEY_F1);
         if (frustumToggleState == GLFW_PRESS && !world_->frustumTogglePressed) {
             world_->frustumTogglePressed = true;
@@ -1036,12 +1211,18 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
         gCamera.setPosition(world_->player.Position() + kEyeOffset);
     }
 
-    glClearColor(kFogColorBase.r, kFogColorBase.g, kFogColorBase.b, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
     int width = 0;
     int height = 0;
     glfwGetFramebufferSize(window_, &width, &height);
+
+    const bool hasPostTarget = EnsurePostProcessTarget(width, height);
+    const bool useCurvaturePass = hasPostTarget && world_->curvatureEnabled;
+
+    glad_glBindFramebuffer(GL_FRAMEBUFFER, useCurvaturePass ? postProcessFbo_ : 0);
+    glViewport(0, 0, width, height);
+    glClearColor(kFogColorBase.r, kFogColorBase.g, kFogColorBase.b, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
     float aspect = width > 0 && height > 0 ? static_cast<float>(width) / static_cast<float>(height) : 1.0f;
 
     constexpr float kCrosshairHalfSizePx = 6.0f;
@@ -1181,6 +1362,13 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
         debugShader_.setMat4("uView", world_->view);
         debugShader_.setVec3("uColor", glm::vec3(1.0f, 0.95f, 0.2f));
         world_->debugDraw.Draw();
+    }
+
+    if (useCurvaturePass) {
+        glad_glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, width, height);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        DrawPostProcessPass();
     }
 
     if (world_->crosshairDraw.HasGeometry()) {
