@@ -106,7 +106,7 @@ private:
     GLuint blockTexture_ = 0;
     GLuint postProcessFbo_ = 0;
     GLuint postProcessColorTexture_ = 0;
-    GLuint postProcessDepthStencilRbo_ = 0;
+    GLuint postProcessDepthTexture_ = 0;
     GLuint postProcessQuadVao_ = 0;
     GLuint postProcessQuadVbo_ = 0;
     int postProcessWidth_ = 0;
