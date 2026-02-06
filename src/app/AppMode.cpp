@@ -40,6 +40,8 @@ namespace app {
 
 namespace {
 constexpr float kFov = 60.0f;
+constexpr float kNearPlane = 0.1f;
+constexpr float kFarPlane = 500.0f;
 constexpr int kRenderRadiusDefault = 8;
 constexpr int kRenderRadiusMin = 2;
 constexpr int kRenderRadiusMax = 32;
@@ -56,7 +58,7 @@ constexpr float kFogEndPaddingChunks = 0.75f;
 constexpr float kFogDensity = 0.0028f;
 constexpr float kFogHeightFalloff = 0.018f;
 constexpr bool kCurvatureDefaultEnabled = true;
-constexpr float kCurvatureDefaultStrength = 0.018f;
+constexpr float kCurvatureDefaultStrength = 0.01f;
 constexpr float kCurvatureStrengthStep = 0.004f;
 constexpr float kCurvatureStrengthMin = 0.0f;
 constexpr float kCurvatureStrengthMax = 0.08f;
@@ -563,11 +565,15 @@ bool AppMode::EnsurePostProcessTarget(int width, int height) {
     glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glad_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, postProcessColorTexture_, 0);
 
-    glad_glGenRenderbuffers(1, &postProcessDepthStencilRbo_);
-    glad_glBindRenderbuffer(GL_RENDERBUFFER, postProcessDepthStencilRbo_);
-    glad_glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
-    glad_glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
-                                   postProcessDepthStencilRbo_);
+    glad_glGenTextures(1, &postProcessDepthTexture_);
+    glad_glBindTexture(GL_TEXTURE_2D, postProcessDepthTexture_);
+    glad_glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0, GL_DEPTH_COMPONENT,
+                      GL_UNSIGNED_INT, nullptr);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glad_glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glad_glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, postProcessDepthTexture_, 0);
 
     const GLenum status = glad_glCheckFramebufferStatus(GL_FRAMEBUFFER);
     glad_glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -589,9 +595,9 @@ bool AppMode::EnsurePostProcessTarget(int width, int height) {
 }
 
 void AppMode::DestroyPostProcessTarget() {
-    if (postProcessDepthStencilRbo_ != 0) {
-        glad_glDeleteRenderbuffers(1, &postProcessDepthStencilRbo_);
-        postProcessDepthStencilRbo_ = 0;
+    if (postProcessDepthTexture_ != 0) {
+        glad_glDeleteTextures(1, &postProcessDepthTexture_);
+        postProcessDepthTexture_ = 0;
     }
     if (postProcessColorTexture_ != 0) {
         glad_glDeleteTextures(1, &postProcessColorTexture_);
@@ -609,11 +615,16 @@ void AppMode::DestroyPostProcessTarget() {
 void AppMode::DrawPostProcessPass() {
     postProcessShader_.use();
     postProcessShader_.setInt("uSceneColor", 0);
+    postProcessShader_.setInt("uSceneDepth", 1);
     postProcessShader_.setInt("uCurvatureEnabled", world_ && world_->curvatureEnabled ? 1 : 0);
     postProcessShader_.setFloat("uCurvatureStrength", world_ ? world_->curvatureStrength : kCurvatureDefaultStrength);
+    postProcessShader_.setFloat("uNearPlane", kNearPlane);
+    postProcessShader_.setFloat("uFarPlane", kFarPlane);
 
     glad_glActiveTexture(GL_TEXTURE0);
     glad_glBindTexture(GL_TEXTURE_2D, postProcessColorTexture_);
+    glad_glActiveTexture(GL_TEXTURE1);
+    glad_glBindTexture(GL_TEXTURE_2D, postProcessDepthTexture_);
 
     glDisable(GL_DEPTH_TEST);
     glad_glBindVertexArray(postProcessQuadVao_);
@@ -1359,7 +1370,7 @@ void AppMode::TickWorld(float deltaTime, const std::chrono::steady_clock::time_p
         world_->crosshairDraw.Clear();
     }
 
-    world_->projection = glm::perspective(glm::radians(kFov), aspect, 0.1f, 500.0f);
+    world_->projection = glm::perspective(glm::radians(kFov), aspect, kNearPlane, kFarPlane);
     world_->view = gCamera.getViewMatrix();
     world_->frustum = Frustum::FromMatrix(world_->projection * world_->view);
     world_->lightDir = glm::normalize(glm::vec3(-0.4f, -1.0f, -0.3f));

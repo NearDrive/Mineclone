@@ -43,7 +43,7 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - **F4**: Toggle periodic perf logging to stdout
 - **F5**: Force-save all dirty loaded chunks
 - **F6**: Toggle streaming (pause/resume)
-- **C**: Toggle post-process curvature (visual-only horizon effect, world simulation unchanged)
+- **C**: Toggle post-process horizon cutoff (depth-aware and visual-only; world simulation unchanged)
 - **Numpad - / Numpad +**: Decrease/increase curvature strength
 - **- / =**: Decrease/increase fog density (runtime tuning)
 - **Left Shift / Right Shift**: Decrease/increase fog height falloff (runtime tuning)
@@ -53,7 +53,7 @@ On Windows, run the generated `Mineclone.exe` from the `build/` directory (or fr
 - The executable prints GPU vendor/renderer/version on startup.
 - In Debug builds, OpenGL KHR_debug messages are enabled (notifications filtered out).
 - All block textures are authored at **32x32** pixels and stored under `textures/`.
-- Curvature post-process defaults to **ON**; press **C** to toggle at runtime.
+- Curvature post-process defaults to **ON**; it now uses a subtle depth-aware horizon cutoff (press **C** to toggle).
 
 ## Voxel World (PR-02)
 - `BlockId` uses `uint16_t` with constants: AIR=0, STONE=1, DIRT=2.
