@@ -17,6 +17,22 @@
 
 #include "stb_image.h"
 
+#ifndef GL_DEPTH_ATTACHMENT
+#define GL_DEPTH_ATTACHMENT 0x8D00
+#endif
+#ifndef GL_DEPTH_COMPONENT
+#define GL_DEPTH_COMPONENT 0x1902
+#endif
+#ifndef GL_DEPTH_COMPONENT24
+#define GL_DEPTH_COMPONENT24 0x81A6
+#endif
+#ifndef GL_TEXTURE1
+#define GL_TEXTURE1 0x84C1
+#endif
+#ifndef GL_UNSIGNED_INT
+#define GL_UNSIGNED_INT 0x1405
+#endif
+
 #include "app/AppInput.h"
 #include "app/GameState.h"
 #include "app/MenuModel.h"
